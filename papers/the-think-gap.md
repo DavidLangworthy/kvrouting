@@ -22,7 +22,7 @@ In an iterated conversation — an agentic coding loop, say — turn *t+1*'s pro
 
 5. **So: yes, take the miss.** The exchange rate is not close. Migrating a session's KV costs 0.43 node-s; a full cold recompute costs 4.76; the barrier cost of holding it on a straggler is 4.86 node-s at 16 DP ranks and 10.05 at 32. **Migrate first; when the fabric is saturated, recompute; never eat the barrier.** The prefill pool — which caching was supposed to shrink — becomes the pressure-relief valve for the fabric.
 
-6. **The free lunch nobody is eating: rebalance during the think gap.** The gap is 15 s. The migration is 43 ms of raw fabric time. The KV is idle and nobody is waiting on it. Pre-stage it on a lightly-loaded worker *before* the turn arrives and you get affinity's TTFT **and** balance's throughput, paying only in background fabric bandwidth. This dissolves the tension that the whole cache-aware-routing literature is organized around.
+6. **The tension dissolves if you rebalance during the think gap — and it does.** The gap is 15 s; the migration is 43 ms; the KV is idle and nobody is waiting on it. Pre-stage a session's KV onto a well-balanced worker *during the gap* and the turn arrives to a warm cache on a balanced node: **balance's throughput (24,713 — within 0.02% of pure balance, +10.6% over affinity) and affinity's median TTFT (0.04 s — a 7× cut) at once,** verified in simulation (§5.3). The tension the whole cache-aware-routing literature is organized around exists only because the decision was assumed to happen at admission; in an iterated workload it need not. The one load-bearing dependency is a return-time predictor — and predicting *arrival* is far easier than predicting *duration*.
 
 Numbers come from a discrete-step simulator with first-principles hardware constants (§6) and from closed-form fixed points where the simulator would only add noise. §9 states plainly what this does and does not license, including the results the clarification killed.
 
@@ -173,21 +173,46 @@ The fabric budget is real and binding: at 400 GB/s per node, of which the EP all
 
 **And it inverts the design philosophy of production cache-aware routers.** They treat prefix hits as close to sacred and load as a guardrail. In a barrier-synchronized decode pool with within-conversation reuse, the ordering is reversed: **load is the objective; the cache is the tiebreak.**
 
-### 5.3 The free lunch: rebalance during the think gap
+### 5.3 The think gap dissolves the tension — measured
 
 Everything above treats routing as a decision made *when the turn arrives*, under time pressure, trading TTFT against balance. **That framing is a mistake, and the workload hands us the way out.**
 
-The think gap is **15 seconds**. The migration is **43 ms** of raw fabric time (0.43 node-s after the contention charge). The KV is idle. **Nobody is waiting on it.**
+The think gap is **15 seconds**. The migration is **43 ms** of raw fabric time (0.44 node-s after the contention charge). The KV is idle. **Nobody is waiting on it.** The feasibility is not close: a 107k-token session is 17.5 GB, crosses a 400 GB/s fabric in 44 ms, and fits inside a 15 s gap **342× over** (closed form in `analytics.prestage_economics`).
 
-So: **pre-stage it.** During the gap, move the session's KV to whichever worker will be lightly loaded when it returns. Then the turn arrives to a warm cache on a well-balanced worker.
+So: **pre-stage it.** During the gap, move the session's KV to whichever worker will be lightly loaded when it returns, so the turn arrives to a warm cache on a well-balanced worker. Crucially, **the router does not change.** A pre-staged session is simply sticky to its (relocated) home; the balancing has already happened, in the gap. We implement four pieces:
 
-- You get **affinity's TTFT** (0.10 s — the KV is already there).
-- You get **balance's throughput** (25,156 — the worker was chosen for load, not history).
-- You pay only in **background fabric bandwidth, spent during idle time**, with ~350× headroom between the gap and the raw transfer.
+- a **background migration queue** (`Sim._prestage`) that scans idle sessions each step, soonest-return-first, and moves the most-imbalancing ones;
+- a **fabric-budget token-bucket** that meters migrations to a `rate` per node per second — the §5.2 constraint made explicit rather than merely charged;
+- a **return-time predictor** (`Sim._predict_return`) — log-normal noise on the true return, σ a free parameter, σ = 0 the oracle;
+- an **inbound load model** — each node tracks the KV already committed to arrive, so a burst of concurrent stages spreads across nodes instead of piling onto whichever node looks lightest at the instant of the decision.
 
-The affinity-versus-balance tension that the entire cache-aware-routing literature is organized around **exists only because everyone assumed the decision must be made at admission.** In an iterated workload it does not. The gap between turns is the scheduling resource, and it is sitting there unused.
+**The result** (E8, G = 16, 5-seed means, pure temporal reuse):
 
-Caveats, honestly: this needs a return-time predictor (when will this session come back?) and it wastes fabric on sessions that never return. Both are tractable — think-time distributions are learnable per-agent-type, and a wrong guess costs one wasted transfer, not a stall. The predictor is far easier than the output-length prediction that Chen et al. correctly avoid, because we are predicting *arrival*, not *duration*.
+| policy | goodput | barrier idle | TTFT p50 | TTFT p95 | staged/s | gap fabric |
+|---|---:|---:|---:|---:|---:|---:|
+| pure affinity | 22,340 | 14.8% | **0.04 s** | **0.12 s** | — | — |
+| pure balance (BF-IO) | 24,717 | **4.1%** | 0.31 s | 0.71 s | — | — |
+| CB-IO (priced) | 24,583 | 5.0% | 0.21 s | 0.62 s | — | — |
+| **think-gap pre-stage** | **24,713** | **4.6%** | **0.04 s** | **0.29 s** | 32 | 28.5 GB/s |
+
+*(All four rows are 5-seed means from one experiment, E8, on the current constants; the α refresh noted in §6 puts them ~2% below §4's earlier figures, but they are internally comparable.)*
+
+**Pre-staging takes both.** Goodput matches pure balance to within 0.02% (24,713 vs 24,717 — +10.6% over affinity); barrier idle matches balance (4.6% vs 4.1%); and **median TTFT drops to affinity's floor, 0.04 s** — a 7× improvement over balance's 0.31 s — with p95 at 0.29 s against balance's 0.71 s. The fabric it spends (28.5 GB/s/node) is spent *in the gap, off the barrier's critical path*, not at admission; every staged session lands on its intended target (hit rate 1.00) and reloads locally over PCIe rather than migrating on arrival.
+
+**A modest budget is a feature, not a limitation.** Sweeping the token-bucket, the optimum is `rate = 2/s/node, lookahead = 1 s` — precisely the ~1–2 migrations/s/node §5.2 said the fabric could afford. Below it (rate = 1) only half the returns are staged and the p95 tail stays at balance's 0.60 s; above it (rate = 3+) the scheme stages marginal, non-imbalancing sessions, and stages them *earlier*, against a load prediction that has gone stale by return time — throughput falls back toward affinity (23,786, idle 9.3%). The budget is not a cost to be minimized; it is the filter that keeps pre-staging trained on the most-imminent, most-imbalancing migrations. The lookahead cuts the same way: stage *close* to the return, or the node you picked is the wrong one by the time the turn lands.
+
+**The load-bearing dependency is the predictor**, exactly as §5's verdict is load-bearing on W. E8's noise sweep:
+
+| predictor noise σ | goodput | barrier idle |
+|---|---:|---:|
+| 0 (oracle) | 24,800 | 4.6% |
+| 0.3 | 24,586 | 4.5% |
+| 0.6 | 24,154 | 8.1% |
+| 1.0 (no skill) | 22,866 | 14.4% |
+
+At σ ≤ 0.3 the full win survives; by σ = 1.0 it has collapsed back to affinity's numbers. The failure mode is benign — a mispredicted session is staged to a *wrong-but-still-local* node and lands there anyway, so TTFT stays low (p95 actually *improves*) while balance is what slips. We predict *arrival*, not *duration* — far easier than the output-length prediction Chen et al. correctly avoid — so σ ≤ 0.3 is a plausible target. But it is a target, not a measurement: **σ is the second number to earn on a real trace, after W.**
+
+The affinity-versus-balance tension that the entire cache-aware-routing literature is organized around **exists only because everyone assumed the decision must be made at admission.** In an iterated workload it does not. The gap between turns is the scheduling resource, and it was sitting there unused.
 
 ---
 
@@ -220,7 +245,7 @@ Ranked by measured effect:
 1. **Offload session KV to node-local host DRAM (then NVMe). Never pin it in HBM; never discard it.** Pinning costs 38% of goodput and 2.4× the fleet at coding think times; discarding costs 83× a reload and inflates the prefill pool 26×. This is the whole ballgame and it is a storage decision, not a routing one.
 2. **Do not expect the cache to help decode. It cannot.** κ = 1, μ is unchanged, and a cascade kernel is a no-op. If someone shows you a throughput win from within-conversation prefix caching, it came from the prefill pool.
 3. **Balance the decode pool; do not chase hit rate.** Affinity costs 10.9% goodput and quadruples barrier idle. Migrating a session's KV is 11× cheaper than the straggler it prevents; above ~16 DP ranks even a full cold recompute is cheaper.
-4. **Rebalance during the think gap.** 15 s of slack against a 43 ms move. This is the highest-leverage idea in the paper and it costs nothing but a return-time estimate.
+4. **Rebalance during the think gap.** 15 s of slack against a 43 ms move buys balance's throughput at affinity's TTFT (§5.3, verified: +10.6% goodput over affinity, median TTFT held at 0.04 s). It costs a return-time estimate — and the win degrades gracefully as that estimate does.
 5. **Keep KV off the fabric except deliberately.** Node-local offload rides PCIe (idle); migration rides the fabric (barrier-critical). Budget the fabric explicitly and let the prefill pool absorb the overflow.
 6. **Size the prefill pool at ~1:3, plus migration overflow.** Even with a perfect cache, the delta's attention against the cached prefix is irreducible — two-thirds of a warm prefill.
 
@@ -253,7 +278,7 @@ If your workload has *both* kinds of reuse — a shared system prompt across ses
 - **These are simulation results from a simulator we wrote.** The hardware constants are first-principles and the sanity anchors (21.4 ms step, ~47 tok/s/stream, 67% memory, 1:3 prefill:decode) are plausible. Nothing here has touched a GPU. Nie et al. validated on real A100s within ~10%; Chen et al. simulate. We simulate.
 - **W = 10 is load-bearing and unmeasured.** The whole "migrate rather than stall" conclusion depends on migration being ~11× cheaper than the barrier; at W = 1 it is 110× cheaper (the conclusion strengthens), at W = 100 it is comparable (the conclusion inverts and affinity returns). **This is the first number to measure.**
 - **T_local is modeled as exactly linear in resident KV**, following Chen et al. Real kernels have fixed overheads; the linear model flatters the barrier story.
-- **The think-gap rebalancing scheme is designed, not tested.** It is a prediction, not a result. It needs a return-time model and it will waste fabric on sessions that never come back.
+- **Think-gap pre-staging is now tested in simulation (§5.3, E8), but its win is contingent on the return-time predictor.** At prediction noise σ ≤ 0.3 it delivers balance's throughput at affinity's TTFT; at σ = 1.0 (no predictive skill) it collapses to affinity's numbers. The failure mode is benign — a misprediction stages to a wrong-but-local node, so TTFT holds while balance slips — and we predict arrival rather than duration, which is the easy direction. But σ is unmeasured on a real trace, and like W = 10 it is load-bearing. The scheme also uses a flat fabric-budget token-bucket, not the three-tier migrate → recompute → never-stall policy §5.2 implies; and it selects targets from instantaneous-plus-inbound load, a proxy for a true per-node forecast at the predicted return instant.
 - **No KV quantization, no speculative decoding, no chunked-prefill overlap.** Int4 KV for the offload tiers would change *c* by 4× and shift every bandwidth number — probably in offload's favour.
 
 ---
@@ -265,4 +290,4 @@ If your workload has *both* kinds of reuse — a shared system prompt across ses
 - **Never pin (−38%, 2.4× fleet), never discard (83×). Offload node-locally.** Break-even gap: 114 ms.
 - **Without sharing, memory stops pre-balancing the pool — so the barrier bites, and cache affinity is what causes it.** 15.8% idle vs 4.1%.
 - **Take the miss.** Migrate (0.43 node-s) ≪ recompute (4.76) ≈ barrier (4.86 at G=16, 10.05 at G=32).
-- **And then stop making the decision at admission.** You have a 15-second gap and a 43-millisecond move. Use it.
+- **And then stop making the decision at admission.** You have a 15-second gap and a 43-millisecond move — pre-stage into it and you get balance's throughput at affinity's TTFT (verified in simulation; contingent on a return-time predictor).
