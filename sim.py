@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from hardware import (ALPHA, M_TOK, T_SYNC, C_KV, DRAM_TOK,
                       prefill_s, fetch_pcie, fetch_ssd, fetch_fabric, barrier_cost)
 
-POLICIES = ["rr", "jsq", "aff", "cache_lb", "bfio", "cbio"]
+POLICIES = ["rr", "jsq", "aff", "cache_lb", "bfio", "cbio", "prestage"]
 RETAIN   = ["offload", "pin", "discard"]
 
 
@@ -45,6 +45,8 @@ class Sess:
     turns: int = 0
     home: int = -1                 # node whose HBM/DRAM/SSD holds this session's KV
     tier: str = "none"             # hbm | dram | ssd | none
+    staged: bool = False           # KV pre-migrated to a balanced node during the gap
+    return_at: float = -1.0        # scheduled return time (predictor's ground truth)
 
 
 class Sim:
@@ -64,6 +66,7 @@ class Sim:
                  n_sess=1200, ctx_median=70_000, ctx_sigma=0.55, ctx_max=260_000,
                  out_median=500, out_sigma=0.8, delta_median=1500,
                  think_median=15.0, think_sigma=0.9,
+                 prestage_rate=2.0, prestage_lookahead=1.0, predict_sigma=0.3,
                  T_end=200.0, T_warm=80.0, seed=0):
         assert policy in POLICIES and retain in RETAIN
         self.__dict__.update(locals()); del self.self
@@ -77,6 +80,7 @@ class Sim:
         self.hold_tok = [0] * G                  # pinned-IDLE KV: resident, not read
         self.hold_of  = {}                       # sid -> (node, tokens)
         self.dram     = [0] * G
+        self.inbound  = [0] * G                  # KV staged to g, not yet returned (return-time load model)
         self.P        = max(2, G // 2)           # prefill nodes
         self.clock, self.rr_ptr = 0.0, 0
         self.wait, self.pend = [], []
@@ -95,6 +99,9 @@ class Sim:
         self.tok = self.done = self.ncold = self.blk = 0
         self.busy = self.idle = self.pf = self.recomp = 0.0
         self.pcie_b = self.fab_b = 0.0
+        self.prestage_s = self.prestage_b = 0.0     # gap-time migration: cost, bytes
+        self.nstaged = self.nstage_hit = 0          # migrations issued; of those, still-home at admission
+        self.prestage_credit = 0.0                  # fabric budget, token-bucket in units of migrations
         self.ttft, self.kap, self.util, self.conc = [], [], [], []
 
     # ---------------------------------------------------------------- the two loads
@@ -152,11 +159,74 @@ class Sim:
                 hit = se.home == g
                 sc  = (0 if (hit and R[g] <= 1.5 * (mean + 1)) else 1e9) + R[g]
             elif self.policy == "bfio": sc = bar + R[g] * 1e-12    # decode balance only
+            elif self.policy == "prestage":
+                # a staged session goes to its (already-balanced) staged home: affinity's
+                # TTFT, no admission-time migration. Unstaged sessions fall back to balance.
+                if se.staged: sc = (0 if se.home == g else 1) * 1e9 + R[g]
+                else:         sc = bar + R[g] * 1e-12
             else:                       sc = cc + self.theta * bar # CB-IO
             if best is None or sc < best:
                 best, bg = sc, g
         self.rr_ptr += 1
         return bg
+
+    # ---------------------------------------------------------------- think-gap pre-staging
+    def _predict_return(self, se):
+        """Return-time predictor. We predict ARRIVAL, not duration -- the far easier
+        problem Chen et al. rightly avoid. The sim knows the true return time
+        (se.return_at); a real predictor is noisy, so we scale the remaining gap by
+        log-normal error. predict_sigma=0 is the oracle upper bound."""
+        rem = max(0.0, se.return_at - self.clock)
+        return self.clock + rem * math.exp(self.rng.gauss(0, self.predict_sigma))
+
+    def _prestage(self, T):
+        """Background migration queue. During the gap a session's KV is resident but
+        idle with nobody waiting on it. If we move it to a balanced node's DRAM BEFORE
+        the request returns, admission sees a node-local reload (affinity's TTFT) on a
+        balanced node (balance's throughput) -- the affinity/balance tension dissolves.
+
+        Bounded by a fabric budget: cross-node KV rides the same fabric as the barrier,
+        so we can afford only ~prestage_rate migrations/s/node (open problem #3). A
+        token-bucket meters it; the router (pick) is unchanged -- only `home` moves."""
+        if self.policy != "prestage":
+            return
+        cap = self.G * self.prestage_rate
+        self.prestage_credit = min(self.prestage_credit + cap * T, cap)  # refill; cap = 1 s of budget
+        if self.prestage_credit < 1.0:
+            return
+        # predicted return-time load: current reads + KV already committed to arrive
+        load = [self.read(g) + self.inbound[g] for g in range(self.G)]
+        # candidates: idle, node-local sessions predicted to return within the lookahead
+        cands = []
+        for ret, sid in self.pend:
+            se = self.sess[sid]
+            if se.staged or se.home < 0 or se.tier not in ("dram", "ssd"):
+                continue
+            if self._predict_return(se) - self.clock <= self.prestage_lookahead:
+                cands.append((ret, sid))
+        cands.sort()                                           # soonest-returning first
+        for _, sid in cands:
+            if self.prestage_credit < 1.0:
+                break
+            se = self.sess[sid]
+            tgt, tl = -1, None                                 # lightest predicted node with DRAM room
+            for g in range(self.G):
+                if g == se.home or self.dram[g] + se.ctx > DRAM_TOK:
+                    continue
+                if tl is None or load[g] < tl:
+                    tl, tgt = load[g], g
+            if tgt < 0 or load[tgt] >= load[se.home]:          # no better-balanced node at return time
+                continue
+            if se.tier == "dram":
+                self.dram[se.home] = max(0, self.dram[se.home] - se.ctx)
+            self.dram[tgt] += se.ctx
+            self.prestage_s += fetch_fabric(se.ctx)            # fabric-bound, off the TTFT critical path
+            self.prestage_b += se.ctx * C_KV
+            self.inbound[tgt] += se.ctx                        # commit: node tgt will carry it at return
+            se.home, se.tier, se.staged = tgt, "dram", True
+            self.nstaged += 1
+            self.prestage_credit -= 1.0
+            load[tgt] += se.ctx                                # balance the next stage against this one
 
     # ---------------------------------------------------------------- main loop
     def run(self):
@@ -196,9 +266,9 @@ class Sim:
                         se.ctx = self.root + self.repo_tr[se.repo] + int(
                             _ln(self.rng, self.ctx_median - self.root - self.repo_tr[se.repo],
                                 self.ctx_sigma))
-                        se.turns = 0; se.home = -1; se.tier = "none"
-                        heapq.heappush(self.pend, (self.clock + _ln(self.rng, self.think_median,
-                                                                    self.think_sigma), se.sid))
+                        se.turns = 0; se.home = -1; se.tier = "none"; se.staged = False
+                        se.return_at = self.clock + _ln(self.rng, self.think_median, self.think_sigma)
+                        heapq.heappush(self.pend, (se.return_at, se.sid))
                         continue
                     think = _ln(self.rng, self.think_median, self.think_sigma)
                     # ---- THE RETENTION DECISION ----
@@ -214,8 +284,11 @@ class Sim:
                         self.pcie_b += se.ctx * C_KV                 # writeback
                     else:
                         se.tier = "none"                             # discard
-                    heapq.heappush(self.pend, (self.clock + think, se.sid))
+                    se.staged = False; se.return_at = self.clock + think
+                    heapq.heappush(self.pend, (se.return_at, se.sid))
                 self.S[g] = keep
+
+            self._prestage(T)     # move idle KV toward balance while nobody is waiting on it
 
             while self.pend and self.pend[0][0] <= self.clock:
                 _, sid = heapq.heappop(self.pend)
@@ -233,6 +306,11 @@ class Sim:
                 if g < 0:
                     still.append(req); self.blk += 1; continue
                 cc, pb, fb = self.cache_cost(se, g)
+                if se.staged:                                         # did the pre-stage pay off?
+                    self.inbound[se.home] = max(0, self.inbound[se.home] - se.ctx)
+                    if g == se.home:
+                        self.nstage_hit += 1
+                    se.staged = False
                 cold = (se.home < 0 or se.tier == "none")
                 if cold:
                     self.recomp += cc; self.ncold += 1
@@ -260,6 +338,9 @@ class Sim:
             ttft50=q(self.ttft, .5), ttft95=q(self.ttft, .95),
             prefill_util=self.pf / (self.P * el),
             recompute=self.recomp / el, cold_s=self.ncold / el, blocked_s=self.blk / el,
+            staged_s=self.nstaged / el, stage_hit=(self.nstage_hit / self.nstaged if self.nstaged else 0.0),
+            prestage_gbs=self.prestage_b / el / 1e9 / self.G,
+            prestage_s=self.prestage_s / el,
             pcie_gbs=self.pcie_b / el / 1e9 / self.G,
             fabric_gbs=self.fab_b / el / 1e9 / self.G,
             elapsed=el, n=self.done,

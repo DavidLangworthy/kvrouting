@@ -22,9 +22,10 @@ python3 experiments.py E1  # one experiment (~60s).  Bare = full suite (~20 min)
 | `hardware.py` | every physical constant, with its derivation. **`W_FABRIC` is the load-bearing one.** |
 | `sim.py` | discrete-step barrier simulator. Separates `resident()` from `read()` — do not re-merge. |
 | `analytics.py` | closed forms. Three of the five headline numbers live here, not in the sim. |
-| `experiments.py` | E1–E7, reproducing every table in the papers. |
+| `experiments.py` | E1–E8, reproducing every table in the papers (E8 = think-gap pre-staging). |
 | `papers/the-think-gap.md` | **the current paper** (temporal / within-conversation reuse) |
 | `papers/price-of-a-cache-hit.md` | archived (spatial / cross-conversation reuse). Right reasoning, wrong premise. |
+| `papers/sources/` | the two source arXiv papers (Nie et al. 2605.04595, Chen et al. 2601.17855) |
 | `results/` | JSON from runs |
 
 ## The one-paragraph version
@@ -46,3 +47,8 @@ Then stop making the decision at admission at all: the gap is 15 seconds and the
 
 Nothing here has touched a GPU. `W_FABRIC = 10` is a judgment call and every "migrate rather
 than stall" conclusion depends on it — at W=100 the conclusion *inverts*. See `CLAUDE.md`.
+
+Pre-staging's win is contingent on a usable **return-time predictor**: at prediction noise
+σ≤0.3 it delivers affinity's TTFT *and* balance's throughput (E8); at σ=1.0 (no predictive
+skill) it collapses back to affinity's numbers. Predicting arrival is far easier than
+predicting output length, but this is the second number to earn on real traces.

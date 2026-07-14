@@ -87,8 +87,43 @@ def E7_w_fabric(T=120):
     hardware.W_FABRIC = orig
 
 
+def _line(tag, r):
+    return (f"  {tag:>22} gp={r['goodput']:7.0f} idle={r['idle']:6.1%} "
+            f"ttft50={r['ttft50']:5.2f} ttft95={r['ttft95']:5.2f} "
+            f"staged/s={r['staged_s']:4.0f} hit={r['stage_hit']:4.2f} "
+            f"pre_fab={r['prestage_gbs']:5.1f}gbs")
+
+
+def E8_prestage(T=150):
+    """open problem #2 (the-think-gap.md). THINK-GAP PRE-STAGING. The
+    affinity-vs-balance tension exists only because the placement decision is assumed
+    to happen at ADMISSION. During the 15 s think gap the session's KV is idle with
+    nobody waiting on it -- migrate it to a balanced node THEN, over otherwise-idle
+    fabric, and admission sees a node-local reload (affinity's TTFT) on a balanced node
+    (balance's throughput). Bounded by a fabric budget (open problem #3); driven by a
+    return-time predictor (predicting ARRIVAL, not duration -- the easy direction)."""
+    print("\nE8  think-gap pre-staging (temporal).  Target: affinity's TTFT + balance's throughput")
+    for p in ["aff", "bfio", "cbio"]:
+        r = Sim(policy=p, seed=1, T_end=T, **TEMPORAL).run()
+        print(_line(p, r)); OUT[f"E8.{p}"] = r
+
+    print("     -- pre-staging (default budget rate=2/s/node, lookahead=1 s, predictor sigma=0.3) --")
+    r = Sim(policy="prestage", seed=1, T_end=T, **TEMPORAL).run()
+    print(_line("prestage", r)); OUT["E8.prestage"] = r
+
+    print("     -- fabric-budget sensitivity (migrations/s/node) --")
+    for rt in [1.0, 2.0, 4.0, 8.0]:
+        r = Sim(policy="prestage", prestage_rate=rt, seed=1, T_end=T, **TEMPORAL).run()
+        print(_line(f"rate={rt}", r)); OUT[f"E8.rate_{rt}"] = r
+
+    print("     -- return-time predictor quality (log-normal sigma; 0=oracle) --")
+    for sg in [0.0, 0.3, 0.6, 1.0]:
+        r = Sim(policy="prestage", predict_sigma=sg, seed=1, T_end=T, **TEMPORAL).run()
+        print(_line(f"sigma={sg}", r)); OUT[f"E8.sigma_{sg}"] = r
+
+
 ALL = dict(E1=E1_policies_temporal, E2=E2_cascade_temporal, E3=E3_cascade_spatial,
-           E4=E4_retention, E5=E5_theta, E6=E6_scale, E7=E7_w_fabric)
+           E4=E4_retention, E5=E5_theta, E6=E6_scale, E7=E7_w_fabric, E8=E8_prestage)
 
 if __name__ == "__main__":
     names = sys.argv[1:] or list(ALL)

@@ -2,7 +2,7 @@
 Closed-form results. These do not need the simulator and are exact given hardware.py.
 Three of the paper's five load-bearing numbers live here, not in the sim.
 """
-from hardware import (ALPHA, M_TOK, T_SYNC, C_KV, B_PCIE,
+from hardware import (ALPHA, M_TOK, T_SYNC, C_KV, B_PCIE, B_FABRIC,
                       prefill_s, fetch_pcie, fetch_ssd, fetch_fabric, barrier_cost, W_FABRIC)
 
 FBAR, O = 107_000, 500      # steady-state mean footprint (tokens) and output length
@@ -76,5 +76,28 @@ def offload_economics(G=16, goodput_on=23666, goodput_off=24156, pfu_on=0.51, pf
               f"-> {gp/(G+pf):7.0f} tok/s/node")
 
 
+def prestage_economics(gap=15.0, turns_s_node=3.0):
+    """T6 / open problem #2. Why think-gap pre-staging is possible at all.
+
+    The affinity/balance tension is assumed to be decided at ADMISSION. But the KV of
+    an idle session sits untouched for the whole think gap with nobody waiting on it.
+    Moving it is fabric-bound and one-time; the question is whether it fits in the gap
+    and inside the fabric budget the barrier can spare."""
+    raw = FBAR * C_KV / B_FABRIC                  # raw migration time, no W_FABRIC (off critical path)
+    charged = fetch_fabric(FBAR)                  # what the sim charges (W_FABRIC, collective contention)
+    gb = FBAR * C_KV / 1e9
+    print(f"\n--- T6: think-gap pre-staging feasibility ({FBAR//1000}k-token session) ---")
+    print(f"  KV to move                : {gb:5.1f} GB")
+    print(f"  raw fabric time           : {raw*1e3:5.0f} ms   (idle-fabric, off the barrier's path)")
+    print(f"  fits in a {gap:.0f}s think gap : {gap/raw:5.0f}x over")
+    print(f"  charged cost (W={W_FABRIC:.0f})       : {charged:5.3f} node-s   (if it collides with the barrier)")
+    print(f"\n  fabric budget: at ~{turns_s_node:.0f} turns/s/node, one migration = {gb:.0f} GB")
+    budget = B_FABRIC / (FBAR * C_KV)             # migrations/s/node at full fabric
+    print(f"    full fabric would allow  {budget:5.1f} migrations/s/node")
+    print(f"    but it shares the barrier's fabric -> spend only the slack: ~1-2/s/node")
+    print(f"  the promise: admission sees a LOCAL reload ({fetch_pcie(FBAR)*1e3:.0f} ms, affinity's TTFT)")
+    print(f"    on a balanced node (balance's throughput). Decision moved OUT of admission.")
+
+
 if __name__ == "__main__":
-    anchors(); exchange_rate(); retention(); offload_economics()
+    anchors(); exchange_rate(); retention(); offload_economics(); prestage_economics()
