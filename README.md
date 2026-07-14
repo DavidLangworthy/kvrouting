@@ -26,6 +26,7 @@ python3 experiments.py E1  # one experiment (~60s).  Bare = full suite (~20 min)
 | `papers/the-think-gap.md` | **the current paper** (temporal / within-conversation reuse) |
 | `papers/price-of-a-cache-hit.md` | archived (spatial / cross-conversation reuse). Right reasoning, wrong premise. |
 | `papers/sources/` | the two source arXiv papers (Nie et al. 2605.04595, Chen et al. 2601.17855) |
+| `figures/` | `saturation.png` — the unified TTFT-vs-throughput story (see `the-think-gap.md` Fig. 1); regenerate with `sweep_load.py` then `plot_saturation.py` |
 | `results/` | JSON from runs |
 
 ## The one-paragraph version

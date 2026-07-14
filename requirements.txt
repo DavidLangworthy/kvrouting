@@ -1,0 +1,6 @@
+# The simulator, analytics, and experiments (sim.py, analytics.py, experiments.py,
+# hardware.py) are pure standard library — nothing to install.
+#
+# These are needed ONLY to regenerate the figure in figures/:
+plotly>=6
+kaleido        # static PNG export via fig.write_image

@@ -186,6 +186,10 @@ So: **pre-stage it.** During the gap, move the session's KV to whichever worker 
 - a **return-time predictor** (`Sim._predict_return`) — log-normal noise on the true return, σ a free parameter, σ = 0 the oracle;
 - an **inbound load model** — each node tracks the KV already committed to arrive, so a burst of concurrent stages spreads across nodes instead of piling onto whichever node looks lightest at the instant of the decision.
 
+![Saturation curves: TTFT p95 vs decode goodput for four routing policies](../figures/saturation.png)
+
+**Figure 1 — pre-staging is the lower-right envelope.** TTFT p95 against decode goodput as offered load rises from light to saturating (16 nodes, within-conversation reuse, one seed per load point). Two shelves: cache affinity and pre-staging keep a session's KV node-local, so a turn arrives to a local reload (~0.1 s TTFT); balance and CB-IO fetch it across the fabric on *every* turn (~0.7 s). But affinity saturates early — barrier idle wastes ~10% of capacity — so under a 0.5 s interactive TTFT-p95 SLO it caps near 24k tokens/s, while balance and CB-IO never enter the acceptable-latency band at all. **Only think-gap pre-staging reaches balance's throughput (~26k) while staying at affinity's latency:** at equal throughput (~24k tok/s) it delivers the same work at ~6× lower TTFT. The curve is the whole paper in one line.
+
 **The result** (E8, G = 16, 5-seed means, pure temporal reuse):
 
 | policy | goodput | barrier idle | TTFT p50 | TTFT p95 | staged/s | gap fabric |
