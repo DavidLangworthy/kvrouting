@@ -3,8 +3,15 @@
 slug: kvrouting
 title: The Think Gap
 date: 2026-07-15
+description: Within-conversation KV reuse is a storage problem, not a routing one, and pre-staging during the think gap beats the throughput/latency tradeoff.
+hero: figures/saturation.png
 intro: ./intro.md
 body: papers/the-think-gap.md
 figures: figures
 dashboard: docs/index.html
+comments:
+  repo: DavidLangworthy/kvrouting
+  repoId: R_kgDOTXnKeg
+  category: Q&A
+  categoryId: DIC_kwDOTXnKes4DBRnV
 # attribution:  # optional — override the default Claude-attribution line here
