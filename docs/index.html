@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kvcalc — disaggregated serving cost model</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F4F6F8; --panel:#FFFFFF; --ink:#121820; --muted:#5B6672; --faint:#8B94A0;
+  --hair:#E3E7EC; --hair2:#EDF0F3;
+  --free:#0F8A6A; --dram:#2E6FB0; --ssd:#C4881F; --fabric:#D45A28; --hot:#BE2F2F;
+  --now:#3E3C8C;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+@media(max-width:860px){.wrap{grid-template-columns:1fr}}
+
+/* ---- rail ---- */
+.rail{background:var(--panel);border-right:1px solid var(--hair);padding:20px 18px 40px;position:sticky;top:0;height:100vh;overflow-y:auto}
+@media(max-width:860px){.rail{position:static;height:auto;border-right:0;border-bottom:1px solid var(--hair)}}
+.brand{font-family:var(--mono);font-weight:600;font-size:19px;letter-spacing:-.02em;margin:0 0 2px}
+.brand span{color:var(--fabric)}
+.tag{color:var(--muted);font-size:12px;margin:0 0 20px;line-height:1.45}
+.grp{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:22px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--hair2)}
+.grp:first-of-type{margin-top:0}
+.f{margin-bottom:13px}
+.f.hot .flab b{color:var(--fabric)}
+.flab{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.flab b{font-weight:500;font-size:12.5px}
+.flab .u{color:var(--faint);font-size:11px;font-family:var(--mono)}
+.frow{display:flex;align-items:center;gap:8px}
+input[type=range]{flex:1;height:3px;-webkit-appearance:none;appearance:none;background:var(--hair);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ink);cursor:pointer;border:2px solid var(--panel);box-shadow:0 0 0 1px var(--hair)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);cursor:pointer;border:2px solid var(--panel)}
+.f.hot input[type=range]::-webkit-slider-thumb{background:var(--fabric)}
+.f.hot input[type=range]::-moz-range-thumb{background:var(--fabric)}
+input[type=number]{width:74px;font-family:var(--mono);font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--hair);border-radius:5px;background:var(--paper);color:var(--ink)}
+input[type=number]:focus{outline:2px solid var(--now);outline-offset:0;border-color:transparent}
+.reset{margin-top:24px;width:100%;font-family:var(--mono);font-size:12px;padding:8px;background:none;border:1px solid var(--hair);border-radius:6px;color:var(--muted);cursor:pointer}
+.reset:hover{border-color:var(--ink);color:var(--ink)}
+
+/* ---- main ---- */
+.main{padding:26px 30px 60px;max-width:1000px}
+@media(max-width:860px){.main{padding:22px 18px 50px}}
+.note{color:var(--muted);font-size:12.5px;margin:0 0 24px;max-width:640px}
+.note b{color:var(--ink);font-weight:600}
+
+.dials{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:10px;overflow:hidden;margin-bottom:26px}
+@media(max-width:640px){.dials{grid-template-columns:repeat(2,1fr)}}
+.dial{background:var(--panel);padding:14px 16px}
+.dial .k{font-size:11px;color:var(--muted);font-weight:500;margin-bottom:6px;letter-spacing:.01em}
+.dial .v{font-family:var(--mono);font-size:23px;font-weight:500;letter-spacing:-.02em}
+.dial .v small{font-size:12px;color:var(--faint);font-weight:400;margin-left:3px}
+
+.panel{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:20px 22px;margin-bottom:20px}
+.ph{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:6px}
+.ph h2{font-size:16px;font-weight:600;margin:0;letter-spacing:-.01em}
+.ph .q{font-size:12.5px;color:var(--muted);margin:3px 0 0;max-width:520px}
+.verdict{font-family:var(--mono);font-size:12.5px;font-weight:600;padding:6px 11px;border-radius:20px;white-space:nowrap;border:1px solid transparent}
+.verdict.flash{animation:flash .5s ease}
+@keyframes flash{0%{transform:scale(1.06)}100%{transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){.verdict.flash{animation:none}}
+.v-keep{background:rgba(15,138,106,.1);color:var(--free);border-color:rgba(15,138,106,.25)}
+.v-move{background:rgba(212,90,40,.1);color:var(--fabric);border-color:rgba(212,90,40,.25)}
+.v-hot{background:rgba(190,47,47,.1);color:var(--hot);border-color:rgba(190,47,47,.25)}
+.chart{margin-top:12px}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.tx{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.tx.r{text-anchor:end}.tx.m{text-anchor:middle}
+.gl{stroke:var(--hair2);stroke-width:1}
+.axl{stroke:var(--hair);stroke-width:1}
+.leg{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px;font-size:12px;font-family:var(--mono)}
+.leg span{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.leg span i{width:14px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block}
+.sub{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+@media(max-width:640px){.sub{grid-template-columns:1fr}}
+.cell{border:1px solid var(--hair);border-radius:8px;padding:12px 14px}
+.cell .k{font-size:11px;color:var(--muted);margin-bottom:5px}
+.cell .v{font-family:var(--mono);font-size:18px;font-weight:500}
+.cell .v small{font-size:11px;color:var(--faint)}
+
+.mc-btn{font-family:var(--mono);font-size:12px;padding:6px 13px;background:var(--ink);color:#fff;border:none;border-radius:6px;cursor:pointer}
+.mc-btn:hover{background:#000}
+.estnote{font-size:11.5px;color:var(--faint);margin-top:12px;line-height:1.45}
+.estnote code{font-family:var(--mono);background:var(--paper);padding:1px 5px;border-radius:4px;color:var(--muted)}
+.bars{display:flex;gap:24px;align-items:flex-end;margin-top:14px;height:150px;padding:0 8px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+.bar .col{width:100%;max-width:110px;border-radius:6px 6px 0 0;transition:height .25s ease}
+@media(prefers-reduced-motion:reduce){.bar .col{transition:none}}
+.bar .bv{font-family:var(--mono);font-size:15px;font-weight:600;margin-bottom:6px}
+.bar .bl{font-size:12px;color:var(--muted);margin-top:8px;text-align:center}
+.bar .bl small{display:block;color:var(--faint);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="rail">
+    <h1 class="brand">kv<span>·</span>calc</h1>
+    <p class="tag">Disaggregated LLM serving — the cost model, live. Read your own constants off your hardware and workload; every number below updates as you type. Nothing here calls a server.</p>
+    <div id="inputs"></div>
+    <button class="reset" onclick="resetAll()">reset to 70B / H100 defaults</button>
+  </aside>
+
+  <main class="main">
+    <p class="note">A calculator for <b>where a request's KV cache should live and where to route it</b>, for iterated workloads with within-conversation prefix reuse. Every panel is closed form — it recomputes instantly as you type; nothing here calls a server. Panels 1–4 are the cost model; <b>panel 5</b> is the way out of the panel-4 tension — pre-stage KV during the think gap for <b>balance's throughput at affinity's latency</b>. Time-resolved numbers come from the discrete-event sim in <code>kvrouting/</code>.</p>
+
+    <div class="dials" id="dials"></div>
+
+    <section class="panel">
+      <div class="ph">
+        <div><h2>Take the miss?</h2><p class="q">A cache hit is one-time and local. The barrier a straggler creates is recurring and global — <code style="font-family:var(--mono);font-size:11px">(G−1)·ô·α·Δ</code> — so its cost climbs with pool size while the cache cost doesn't. Drag <b>G</b> and watch the verdict flip.</p></div>
+        <div id="v-miss" class="verdict"></div>
+      </div>
+      <div class="chart" id="c-miss"></div>
+      <div class="leg">
+        <span><i style="border-color:var(--free)"></i>node-local reload</span>
+        <span><i style="border-color:var(--fabric)"></i>migrate (fabric)</span>
+        <span><i style="border-color:var(--hot)"></i>cold recompute</span>
+        <span><i style="border-color:var(--ink)"></i>barrier of the straggler</span>
+        <span><i style="border-color:var(--now);border-top-style:dashed"></i>your G</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="ph">
+        <div><h2>Where should idle KV live during the think gap?</h2><p class="q">Between turns the session's KV is resident but not read. Pinning it in HBM steals slots from active work; the penalty is the duty-cycle factor <code style="font-family:var(--mono);font-size:11px">1 + I/T<sub>s</sub></code>. Offloading it node-locally costs a PCIe round trip.</p></div>
+        <div id="v-ret" class="verdict"></div>
+      </div>
+      <div class="chart" id="c-ret"></div>
+      <div class="leg">
+        <span><i style="border-color:var(--hot)"></i>pin in HBM</span>
+        <span><i style="border-color:var(--free)"></i>offload node-local</span>
+        <span><i style="border-color:var(--now);border-top-style:dashed"></i>your think gap</span>
+      </div>
+      <div class="sub" id="s-ret"></div>
+    </section>
+
+    <section class="panel">
+      <div class="ph">
+        <div><h2>How big does the prefill pool get?</h2><p class="q">Discarding KV between turns means every turn is a cold recompute — <code style="font-family:var(--mono);font-size:11px">O(s²)</code> attention. Offloading means only the delta recomputes. This is the whole case for the offload tier, in nodes.</p></div>
+      </div>
+      <div class="sub" id="s-pool"></div>
+    </section>
+
+    <section class="panel">
+      <div class="ph">
+        <div><h2>Does routing matter? <span style="font-weight:400;color:var(--faint);font-size:13px">— quick estimate</span></h2><p class="q">With no cross-conversation sharing the memory cap stops pre-balancing the pool, so cache affinity concentrates the long-context sessions and the barrier taxes everyone. This is a steady-state occupancy sample — the shape is right; for exact time-resolved numbers run the DES. <b>Panel 5 shows how pre-staging in the think gap dissolves this tension.</b></p></div>
+        <button class="mc-btn" onclick="resample()">Resample workload</button>
+      </div>
+      <div class="bars" id="c-route"></div>
+      <p class="estnote">Instant occupancy estimate over a fresh random draw of active sessions. The discrete-event simulator in <code>kvrouting/</code> is ground truth — it adds queueing, admission blocking, and TTFT tails, and is the thing a <b>Simulate</b> button would call. Idle = (max − mean)/max of per-node read load.</p>
+    </section>
+
+    <section class="panel">
+      <div class="ph">
+        <div><h2>Rebalance during the think gap?</h2><p class="q">The affinity/balance tension above is only forced if you decide <i>at admission</i>. But between turns the session's KV sits idle with nobody waiting on it. Move it to a balanced node <b>during the gap</b>, over otherwise-idle fabric, and the turn arrives to a node-local reload on a balanced node — affinity's TTFT <i>and</i> balance's throughput. Feasibility is closed form (below, live); the throughput/latency win is measured.</p></div>
+        <div id="v-pre" class="verdict"></div>
+      </div>
+      <div class="chart" id="c-pre"></div>
+      <div class="sub" id="s-pre"></div>
+      <p class="estnote">Move time, headroom, and budget are live from your constants (this is <code>analytics.prestage_economics</code>). The throughput/latency win is <b>measured</b> — discrete-event sim, experiment E8, 5-seed, default 70B/H100/16-node workload — and is <b>contingent on a return-time predictor</b>: the full win holds at prediction noise σ≤0.3 and decays to affinity's numbers at σ=1.0. The static picture is <code>figures/saturation.png</code>.</p>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+// ------- input spec (grouped). value stored as-is; converted in constants() -------
+const SPEC=[
+ ["Model",[
+  ["NP","parameters","B",1,1000,1,70],
+  ["NL","layers","",8,160,1,80],
+  ["DM","d_model","",512,20480,256,8192],
+  ["NKV","KV heads","",1,128,1,8],
+  ["DH","head dim","",32,256,8,128],
+  ["DB","KV bytes/elem","B",1,2,1,1],
+ ]],
+ ["Node & links",[
+  ["HBM","HBM bandwidth","TB/s",1,120,0.1,26.4],
+  ["MGB","KV budget / node","GB",10,2000,10,520],
+  ["PF","peak compute","PFLOP/s",0.5,120,0.1,15.8],
+  ["MFU","MFU","",0.1,0.8,0.01,0.40],
+  ["TS","EP all-to-all","ms",0.1,20,0.1,2],
+  ["PCIE","PCIe / host link","GB/s",50,2000,10,300],
+  ["FAB","fabric / node","GB/s",50,6000,10,400],
+  ["SSD","NVMe","GB/s",5,500,5,70],
+  ["W","fabric contention ×","",1,100,1,10,true],
+ ]],
+ ["Workload",[
+  ["FB","mean context","tok",1000,500000,1000,107000],
+  ["O","output length","tok",20,4000,10,500],
+  ["DL","new tokens / turn","tok",100,20000,100,1500],
+  ["TI","think gap","s",0.1,300,0.1,15],
+  ["G","decode nodes","",2,256,1,16],
+ ]],
+];
+const V={}; const DEF={};
+SPEC.forEach(([,fs])=>fs.forEach(f=>{V[f[0]]=f[6];DEF[f[0]]=f[6];}));
+
+// ------- build rail -------
+(function(){
+ const host=document.getElementById("inputs");
+ SPEC.forEach(([grp,fs])=>{
+  const g=document.createElement("div");g.className="grp";g.textContent=grp;host.appendChild(g);
+  fs.forEach(f=>{
+   const[id,lab,unit,mn,mx,st,,hot]=f;
+   const d=document.createElement("div");d.className="f"+(hot?" hot":"");
+   d.innerHTML=`<div class="flab"><b>${lab}</b><span class="u">${unit||""}</span></div>
+     <div class="frow"><input type="range" id="r_${id}" min="${mn}" max="${mx}" step="${st}" value="${V[id]}">
+     <input type="number" id="n_${id}" min="${mn}" max="${mx}" step="${st}" value="${V[id]}"></div>`;
+   host.appendChild(d);
+   const r=d.querySelector("#r_"+id),n=d.querySelector("#n_"+id);
+   const push=(val)=>{val=+val;if(isNaN(val))return;V[id]=val;r.value=val;n.value=val;recompute();};
+   r.addEventListener("input",e=>push(e.target.value));
+   n.addEventListener("input",e=>push(e.target.value));
+  });
+ });
+})();
+function resetAll(){Object.keys(DEF).forEach(k=>{V[k]=DEF[k];document.getElementById("r_"+k).value=DEF[k];document.getElementById("n_"+k).value=DEF[k];});recompute();}
+
+// ------- model (mirrors hardware.py) -------
+function K(){
+ const C_KV=2*V.NL*V.NKV*V.DH*V.DB;
+ const HBM=V.HBM*1e12, FLOP=V.PF*1e15*V.MFU;
+ const M_TOK=V.MGB*1e9/C_KV;
+ const ALPHA=C_KV/HBM;
+ const TH_LIN=2*V.NP*1e9/FLOP;
+ const TH_ATT=4*V.DM*V.NL/FLOP;
+ const T_SYNC=V.TS/1e3;
+ const Bp=V.PCIE*1e9, Bf=V.FAB*1e9, Bs=V.SSD*1e9;
+ const prefill=(n,ctx)=>TH_LIN*n+TH_ATT*n*(ctx+n/2);
+ const fpcie=t=>t*C_KV/Bp, fssd=t=>t*C_KV/Bs, ffab=t=>t*C_KV/Bf*V.W;
+ const barrier=(G,o,ex)=>(G-1)*o*ALPHA*Math.max(0,ex);
+ return {C_KV,M_TOK,ALPHA,TH_LIN,TH_ATT,T_SYNC,prefill,fpcie,fssd,ffab,barrier};
+}
+
+// ------- log helpers -------
+const lg=Math.log10;
+function logmap(v,a,b,p0,p1){return p0+(lg(v)-lg(a))/(lg(b)-lg(a))*(p1-p0);}
+function linmap(v,a,b,p0,p1){return p0+(v-a)/(b-a)*(p1-p0);}
+function decades(a,b){const o=[];for(let e=Math.floor(lg(a));e<=Math.ceil(lg(b));e++)o.push(Math.pow(10,e));return o;}
+function fmt(x){if(x>=1000)return Math.round(x).toLocaleString();if(x>=100)return x.toFixed(0);if(x>=10)return x.toFixed(1);if(x>=1)return x.toFixed(2);if(x>=0.01)return x.toFixed(3);return x.toExponential(1);}
+function setVerdict(el,txt,cls){const changed=el.textContent!==txt;el.textContent=txt;el.className="verdict "+cls;if(changed){el.classList.remove("flash");void el.offsetWidth;el.classList.add("flash");}}
+
+// ------- dials -------
+function dials(k){
+ const step=k.ALPHA*k.M_TOK+k.T_SYNC;
+ const warm=k.prefill(V.DL,V.FB), warmAtt=(warm-k.prefill(V.DL,0))/warm;
+ const ratio=k.prefill(V.FB,0)/k.fpcie(V.FB);
+ const d=[
+  ["α — read cost",(k.ALPHA*1e9).toFixed(2),"ns/tok/step"],
+  ["decode step @ full HBM",(step*1e3).toFixed(1),"ms"],
+  ["per-stream rate",(1/step).toFixed(0),"tok/s"],
+  ["move vs recompute KV",ratio.toFixed(0)+"×","cheaper"],
+ ];
+ document.getElementById("dials").innerHTML=d.map(([kk,vv,uu])=>
+  `<div class="dial"><div class="k">${kk}</div><div class="v">${vv}<small>${uu}</small></div></div>`).join("");
+}
+
+// ------- panel 1: exchange rate -------
+function pMiss(k){
+ const W=680,H=300,L=54,R=18,T=16,B=42, x0=L,x1=W-R,y0=T,y1=H-B;
+ const dram=k.fpcie(V.FB), fab=k.ffab(V.FB), cold=k.prefill(V.FB,0);
+ const Gs=[]; for(let g=2;g<=256;g*=1.15)Gs.push(g); Gs.push(256);
+ const bar=g=>k.barrier(g,V.O,V.FB);
+ const yv=[dram,fab,cold]; const maxB=bar(256);
+ let ymin=Math.max(1e-3,Math.min(dram,fab,cold)*0.5), ymax=Math.max(maxB,cold)*1.3;
+ const gx=g=>logmap(g,2,256,x0,x1), gy=v=>logmap(Math.max(v,ymin),ymin,ymax,y1,y0);
+ let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost versus pool size">`;
+ // y grid (log)
+ decades(ymin,ymax).forEach(d=>{const y=gy(d);if(y<y0-1||y>y1+1)return;
+  s+=`<line class="gl" x1="${x0}" x2="${x1}" y1="${y}" y2="${y}"/><text class="tx r" x="${x0-8}" y="${y+3}">${d>=1?d:d.toFixed(d<0.1?2:1)}</text>`;});
+ s+=`<text class="tx r" x="${x0-8}" y="${y0-4}">node·s</text>`;
+ // x grid at nice G
+ [2,4,8,16,32,64,128,256].forEach(g=>{const x=gx(g);
+  s+=`<line class="gl" x1="${x}" x2="${x}" y1="${y0}" y2="${y1}"/><text class="tx m" x="${x}" y="${y1+16}">${g}</text>`;});
+ s+=`<text class="tx m" x="${(x0+x1)/2}" y="${H-6}">decode nodes G</text>`;
+ // take-the-miss shaded region (barrier > migrate)
+ // find G where barrier crosses fab
+ const crossFab=(()=>{for(let g=2;g<=256;g+=0.5)if(bar(g)>=fab)return g;return null;})();
+ if(crossFab){const xc=gx(crossFab);s+=`<rect x="${xc}" y="${y0}" width="${x1-xc}" height="${y1-y0}" fill="rgba(212,90,40,.055)"/>`;}
+ // constant lines
+ const hline=(v,c,dash)=>`<line x1="${x0}" x2="${x1}" y1="${gy(v)}" y2="${gy(v)}" stroke="${c}" stroke-width="2" ${dash?'stroke-dasharray="2 3"':''}/>`;
+ s+=hline(dram,"var(--free)")+hline(fab,"var(--fabric)")+hline(cold,"var(--hot)");
+ // barrier curve
+ let p=Gs.map(g=>`${gx(g).toFixed(1)},${gy(bar(g)).toFixed(1)}`).join(" ");
+ s+=`<polyline points="${p}" fill="none" stroke="var(--ink)" stroke-width="2.5"/>`;
+ // current G marker
+ const xg=gx(V.G);
+ s+=`<line x1="${xg}" x2="${xg}" y1="${y0}" y2="${y1}" stroke="var(--now)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+ s+=`<circle cx="${xg}" cy="${gy(bar(V.G))}" r="4" fill="var(--now)"/>`;
+ s+=`</svg>`;
+ document.getElementById("c-miss").innerHTML=s;
+ // verdict
+ const b=bar(V.G);
+ if(b>cold) setVerdict(document.getElementById("v-miss"),"take the cold miss","v-hot");
+ else if(b>fab) setVerdict(document.getElementById("v-miss"),"migrate, don't hold","v-move");
+ else setVerdict(document.getElementById("v-miss"),"keep the hit","v-keep");
+}
+
+// ------- panel 2: retention -------
+function retSolve(k,I,pin){
+ const cap=k.M_TOK/V.FB; let A=Math.min(5,cap);
+ for(let i=0;i<600;i++){const step=k.ALPHA*A*V.FB+k.T_SYNC;const Ts=V.O*step;
+  const An=pin?cap/(1+I/Ts):cap; A=0.5*A+0.5*An;}
+ const step=k.ALPHA*A*V.FB+k.T_SYNC, Ts=V.O*step;
+ return {A,step,Ts,tok:A/step,sess:A*(1+I/Ts)};
+}
+function pRet(k){
+ const W=680,H=280,L=54,R=18,T=16,B=42,x0=L,x1=W-R,y0=T,y1=H-B;
+ const Is=[];for(let i=0.1;i<=300;i*=1.1)Is.push(i);Is.push(300);
+ const off=Is.map(I=>retSolve(k,I,false).sess), pin=Is.map(I=>retSolve(k,I,true).sess);
+ const ymax=Math.max(...off,...pin)*1.1;
+ const ix=I=>logmap(I,0.1,300,x0,x1), iy=v=>linmap(v,0,ymax,y1,y0);
+ let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sessions per node versus think gap">`;
+ const yt=niceTicks(0,ymax,5);
+ yt.forEach(t=>{const y=iy(t);s+=`<line class="gl" x1="${x0}" x2="${x1}" y1="${y}" y2="${y}"/><text class="tx r" x="${x0-8}" y="${y+3}">${t}</text>`;});
+ s+=`<text class="tx r" x="${x0-8}" y="${y0-4}">sess/node</text>`;
+ [0.1,1,10,100,300].forEach(I=>{const x=ix(I);s+=`<line class="gl" x1="${x}" x2="${x}" y1="${y0}" y2="${y1}"/><text class="tx m" x="${x}" y="${y1+16}">${I<1?I:I}s</text>`;});
+ s+=`<text class="tx m" x="${(x0+x1)/2}" y="${H-6}">think gap I</text>`;
+ const path=arr=>arr.map((v,i)=>`${ix(Is[i]).toFixed(1)},${iy(v).toFixed(1)}`).join(" ");
+ s+=`<polyline points="${path(off)}" fill="none" stroke="var(--free)" stroke-width="2.5"/>`;
+ s+=`<polyline points="${path(pin)}" fill="none" stroke="var(--hot)" stroke-width="2.5"/>`;
+ // break-even (PCIe round trip)
+ const be=2*k.fpcie(V.FB); if(be>=0.1&&be<=300){const xb=ix(be);s+=`<line x1="${xb}" x2="${xb}" y1="${y0}" y2="${y1}" stroke="var(--faint)" stroke-width="1" stroke-dasharray="2 3"/>`;}
+ const xi=ix(V.TI);
+ s+=`<line x1="${xi}" x2="${xi}" y1="${y0}" y2="${y1}" stroke="var(--now)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+ const cur=retSolve(k,V.TI,true), curo=retSolve(k,V.TI,false);
+ s+=`<circle cx="${xi}" cy="${iy(cur.sess)}" r="4" fill="var(--hot)"/><circle cx="${xi}" cy="${iy(curo.sess)}" r="4" fill="var(--free)"/>`;
+ s+=`</svg>`;
+ document.getElementById("c-ret").innerHTML=s;
+ const pen=curo.sess/cur.sess;
+ setVerdict(document.getElementById("v-ret"), pen>1.05?`offload — ${pen.toFixed(1)}× more sessions`:"offload","v-keep");
+ const cold=k.prefill(V.FB,0), disc=cold/k.fpcie(V.FB);
+ document.getElementById("s-ret").innerHTML=[
+  ["pinning penalty at your gap",pen.toFixed(1)+"×","fewer sessions/node"],
+  ["break-even gap (PCIe round trip)",(2*k.fpcie(V.FB)*1e3).toFixed(0),"ms — pin never wins above"],
+  ["discard vs offload",disc.toFixed(0)+"×","costlier per turn"],
+ ].map(([kk,vv,uu])=>`<div class="cell"><div class="k">${kk}</div><div class="v">${vv} <small>${uu}</small></div></div>`).join("");
+}
+function niceTicks(a,b,n){const step=Math.pow(10,Math.floor(lg((b-a)/n)));const err=(b-a)/n/step;const m=err>=7.5?10:err>=3.5?5:err>=1.5?2:1;const s=m*step;const o=[];for(let t=Math.ceil(a/s)*s;t<=b+1e-9;t+=s)o.push(Math.round(t*100)/100);return o;}
+
+// ------- panel 3: pool economics (fully derived) -------
+function pPool(k){
+ const cap=k.M_TOK/V.FB, step=k.ALPHA*k.M_TOK+k.T_SYNC, Ts=V.O*step;
+ const rate=cap/Ts; // turns/s/node
+ const warm=k.prefill(V.DL,V.FB), cold=k.prefill(V.FB,0)+warm;
+ const rOff=rate*warm, rDisc=rate*cold;
+ const decTok=cap/step;
+ const perOff=decTok/(1+rOff), perDisc=decTok/(1+rDisc);
+ const gain=perOff/perDisc;
+ const rat=r=>r<1?`1 : ${Math.round(1/r)}`:`${Math.round(r)} : 1`;
+ document.getElementById("s-pool").innerHTML=[
+  ["offload — prefill : decode",rat(rOff),"nodes"],
+  ["discard — prefill : decode",rat(rDisc),"nodes"],
+  ["throughput gain from offload",gain.toFixed(1)+"×","tok/s per total node"],
+ ].map(([kk,vv,uu])=>`<div class="cell"><div class="k">${kk}</div><div class="v">${vv} <small>${uu}</small></div></div>`).join("");
+}
+
+// ------- panel 4: routing occupancy estimate -------
+let SEED=1;
+function rand(){SEED=(SEED*1103515245+12345)&0x7fffffff;return SEED/0x7fffffff;}
+function lognorm(med,sig){let u=0,v=0;while(u===0)u=rand();while(v===0)v=rand();const z=Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);return med*Math.exp(sig*z);}
+function pRoute(k){
+ const G=Math.round(V.G), cap=k.M_TOK/V.FB, Kt=Math.max(G,Math.round(cap*G*0.9));
+ const sizes=[];for(let i=0;i<Kt;i++)sizes.push(Math.min(V.FB*4,lognorm(V.FB,0.5)));
+ // affinity: each request to a random sticky home
+ const la=new Array(G).fill(0);
+ sizes.forEach(sz=>{la[Math.floor(rand()*G)]+=sz;});
+ // balance: greedy least-loaded
+ const lb=new Array(G).fill(0);
+ sizes.forEach(sz=>{let m=0;for(let g=1;g<G;g++)if(lb[g]<lb[m])m=g;lb[m]+=sz;});
+ const idle=arr=>{const mx=Math.max(...arr),mn=arr.reduce((a,b)=>a+b,0)/arr.length;return mx>0?(mx-mn)/mx:0;};
+ const ia=idle(la), ib=idle(lb);
+ const bars=[["affinity",ia,"var(--hot)"],["balance",ib,"var(--free)"]];
+ const mx=Math.max(ia,ib,0.02);
+ document.getElementById("c-route").innerHTML=bars.map(([lab,v,c])=>
+  `<div class="bar"><div class="bv" style="color:${c}">${(v*100).toFixed(1)}%</div>
+   <div class="col" style="height:${Math.max(2,v/mx*100)}%;background:${c}"></div>
+   <div class="bl">${lab}<small>barrier idle</small></div></div>`).join("");
+}
+function resample(){SEED=(Date.now()&0x7fffffff)||1;pRoute(K());}
+
+// ------- panel 5: think-gap pre-staging -------
+function pPrestage(k){
+ const raw=V.FB*k.C_KV/(V.FAB*1e9);            // migration over fabric, no W (idle-fabric, off critical path)
+ const head=V.TI/raw;                           // gap / move
+ const budget=(V.FAB*1e9)/(V.FB*k.C_KV);        // migrations/s/node at full fabric
+ const gb=V.FB*k.C_KV/1e9;
+ // verdict
+ const el=document.getElementById("v-pre");
+ if(head>=5) setVerdict(el,"pre-stage in the gap","v-keep");
+ else if(head>1) setVerdict(el,"tight — stage the most urgent","v-move");
+ else setVerdict(el,"gap too short to stage","v-hot");
+ // visual: the think gap as a bar; the migration as a sliver at its start
+ const W=680,H=96,L=54,R=18,x0=L,x1=W-R,yb=44,bh=26;
+ const sliver=Math.max(3,Math.min(1,raw/V.TI)*(x1-x0));
+ let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Migration time within the think gap">`;
+ s+=`<text class="tx" x="${x0}" y="${yb-9}">think gap = ${fmt(V.TI)} s</text>`;
+ s+=`<text class="tx r" x="${x1}" y="${yb-9}">idle fabric — nobody is waiting</text>`;
+ s+=`<rect x="${x0}" y="${yb}" width="${x1-x0}" height="${bh}" rx="5" fill="rgba(15,138,106,.10)" stroke="var(--free)" stroke-width="1"/>`;
+ s+=`<rect x="${x0}" y="${yb}" width="${sliver}" height="${bh}" rx="2" fill="var(--fabric)"/>`;
+ s+=`<line x1="${x0+sliver}" x2="${x0+sliver+30}" y1="${yb+bh/2}" y2="${yb+bh+14}" stroke="var(--fabric)" stroke-width="1"/>`;
+ s+=`<text class="tx" x="${x0+sliver+34}" y="${yb+bh+18}" fill="var(--fabric)">migration ${(raw*1e3).toFixed(0)} ms · ${gb.toFixed(0)} GB — ${head>=1?head.toFixed(0)+"× headroom":"exceeds the gap"}</text>`;
+ s+=`</svg>`;
+ document.getElementById("c-pre").innerHTML=s;
+ // sub-cells: live feasibility (1,2) + measured win (3)
+ document.getElementById("s-pre").innerHTML=[
+  ["move fits in the gap", head>=1?head.toFixed(0)+"×":"gap < move", "the move is a sliver of the gap"],
+  ["fabric budget", budget.toFixed(0), "migr/s/node full fabric · ~1–2 usable"],
+  ["measured win — E8", "24.7k", "tok/s = balance, at affinity's 0.04 s TTFT"],
+ ].map(([kk,vv,uu])=>`<div class="cell"><div class="k">${kk}</div><div class="v">${vv} <small>${uu}</small></div></div>`).join("");
+}
+
+// ------- master -------
+function recompute(){const k=K();dials(k);pMiss(k);pRet(k);pPool(k);pRoute(k);pPrestage(k);}
+recompute();
+</script>
+</body>
+</html>

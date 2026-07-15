@@ -15,6 +15,18 @@ python3 sim.py             # one simulator run
 python3 experiments.py E1  # one experiment (~60s).  Bare = full suite (~20 min)
 ```
 
+## Live dashboard
+
+`docs/index.html` (**kvcalc**) is a self-contained dashboard for the cost model — the
+closed forms recompute instantly as you drag any of ~21 hardware/workload constants.
+No backend, no build step, no dependencies. Open the file directly, or serve `docs/`
+as a static site (GitHub Pages: Settings → Pages → `main` branch, `/docs`). Five
+panels: the exchange rate, retention, prefill-pool economics, affinity-vs-balance
+routing, and — **panel 5** — think-gap pre-staging, whose feasibility is live and whose
+throughput/latency win is measured against the simulator (E8; see `figures/saturation.png`).
+The one output that is not closed form (a time-resolved discrete-event run) is the
+simulator itself.
+
 ## Files
 
 | file | what |
@@ -27,6 +39,7 @@ python3 experiments.py E1  # one experiment (~60s).  Bare = full suite (~20 min)
 | `papers/price-of-a-cache-hit.md` | archived (spatial / cross-conversation reuse). Right reasoning, wrong premise. |
 | `papers/sources/` | the two source arXiv papers (Nie et al. 2605.04595, Chen et al. 2601.17855) |
 | `figures/` | `saturation.png` — the unified TTFT-vs-throughput story (see `the-think-gap.md` Fig. 1); regenerate with `sweep_load.py` then `plot_saturation.py` |
+| `docs/index.html` | **kvcalc** — the live, self-contained cost-model dashboard (see above) |
 | `results/` | JSON from runs |
 
 ## The one-paragraph version
