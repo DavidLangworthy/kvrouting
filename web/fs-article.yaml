@@ -1,0 +1,10 @@
+# kvrouting article — web wrapper. Lives in the CONTENT repo (kvrouting/web/), not in fs-web.
+# Content paths are relative to the repo root (--content-root); intro is relative to this file.
+slug: kvrouting
+title: The Think Gap
+date: 2026-07-15
+intro: ./intro.md
+body: papers/the-think-gap.md
+figures: figures
+dashboard: docs/index.html
+# attribution:  # optional — override the default Claude-attribution line here
