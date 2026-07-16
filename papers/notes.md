@@ -120,27 +120,33 @@ with the `resident`/`read` split so idleness has somewhere to live.
 
 ---
 
-## Blog structure: two articles
+## Blog structure
 
-The provenance seam *is* the article boundary, and **Chen's sticky-KV assumption is the
-hinge**: article 1 lives inside it, article 2 relaxes it.
+**Article 1 — the two papers are one object.** *(Written: `blog/article-1.md`,
+`docs/article-1.html`.)* The footprint trapezoid; the `g(s,o)` byte·seconds area; the two
+functionals — integrate over time → capacity (Nie, **single-worker**), max over workers →
+barrier (Chen); the unification (two formalisms, one object). Ends at the boundary both papers
+share: **one-shot requests — no reuse, no persistence, no migration.** Pure exposition — **no
+workload, no `resident`/`read`, no results, no unmeasured constant.** Names the papers
+accurately: Nie, Si & Zhou (*ICML 2026*, arXiv 2605.04595) and Chen, Bu, Song, Lu, Ye & Zhou
+(*arXiv preprint*, 2601.17855; **not** ICML); shared author Zijie Zhou = the "related teams".
 
-**Article 1 — the two papers, honestly generalized.** The `g(s,o)` byte·seconds area; the two
-functionals (integrate over time → capacity / Nie; max over nodes → barrier / Chen); the
-`resident`/`read` split; the temporal workload (turns never co-reside, so the decode pool
-gains nothing from reuse — the cache's value is prefill, i.e. storage). Source-native results
-only: **never-pin / offload** (Nie, generalized) and **balance-beats-affinity — the barrier
-bites** (Chen, temporal). Ends on the tension: affinity manufactures the barrier idle, balance
-pays the TTFT, and *within Chen's world you are stuck, because KV cannot move*. Nothing here
-rests on an unmeasured constant — it's the safe, source-faithful article.
+*Fidelity fixes already caught in article 1 (the papers are narrower than easy paraphrase
+suggests): Nie proves single-worker **scheduling**, not routing; and neither paper has our
+think-gap / iterated workload — both are one-shot. Both corrected in the draft.*
 
-**Article 2 — migration (assumes article 1).** Opens by relaxing the one assumption article 1
-left standing: KV *can* move. Then the two results that follow — the **exchange rate**
-(reactive: migrate vs recompute vs eat the barrier) and **think-gap pre-staging** (proactive:
-move it in the gap). Both are ours; both rest on our two unmeasured numbers, **`W_FABRIC`** and
-the predictor **σ**, put up front as the load-bearing risks. The saturation figure (Fig. 1) and
-the pre-staging dashboard panel land here. Open with a one-paragraph recap of article 1 so it
-stands alone.
+**Everything downstream needs a workload the papers don't have.** Add turns + think gaps (ours)
+and `resident` splits from `read`; then the results follow — never-pin / retention (Nie's engine,
+our workload), affinity-manufactures-the-barrier (Chen's barrier, our workload), then the
+migration results: the **exchange rate** (reactive) and **think-gap pre-staging** (proactive).
+
+**Open — how to split the downstream** (decide before drafting):
+- (a) one "Article 2" = workload + all four results; or
+- (b) a **middle** article (workload + `resident`/`read` + retention + affinity — all *safe*,
+  no unmeasured constant), then a **third** on migration (the exchange rate + pre-staging).
+The migration piece is where **`W_FABRIC`** and the predictor **σ** enter — put up front as the
+load-bearing risks — and where the saturation figure (Fig. 1) and the pre-staging dashboard panel
+land. It opens by relaxing the papers' shared one-shot / sticky-KV assumption.
 
 **`W_FABRIC` — the constant article 2 lives or dies on.** Cross-node KV migration rides the
 *same fabric as the per-step EP all-to-all*, and that all-to-all **is** the barrier — so a
