@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A KV cache is an area, not a size — kvrouting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F4F6F8; --panel:#FFFFFF; --ink:#141a21; --muted:#5B6672; --faint:#8B94A0;
+  --hair:#E3E7EC; --hair2:#EDF0F3; --accent:#2E6FB0; --dot:#D45A28;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:17.5px;line-height:1.66;-webkit-font-smoothing:antialiased}
+.wrap{max-width:716px;margin:0 auto;padding:38px 26px 96px}
+
+/* masthead */
+.eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--faint);margin:0 0 20px}
+.eyebrow .d{color:var(--dot);font-weight:600}
+h1{font-weight:700;font-size:34px;line-height:1.14;letter-spacing:-.022em;margin:0 0 16px}
+.dek{color:var(--muted);font-size:16.5px;line-height:1.56;margin:0 0 11px;max-width:640px}
+hr.rule{height:1px;background:var(--hair);border:0;margin:32px 0 8px}
+
+/* body */
+h2{font-weight:600;font-size:20px;letter-spacing:-.01em;margin:46px 0 13px;
+  display:flex;align-items:baseline;gap:12px}
+h2 .n{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--faint)}
+p{margin:0 0 18px}
+strong{font-weight:600}
+em{font-style:italic}
+blockquote{margin:22px 0;padding:14px 20px;border-left:3px solid var(--accent);
+  background:var(--panel);border-radius:0 10px 10px 0;color:var(--ink)}
+blockquote p{margin:0 0 8px;font-size:16.5px}
+blockquote p:last-child{margin:0}
+blockquote .src{color:var(--faint);font-style:normal;font-size:14px}
+ul{margin:0 0 18px;padding-left:0;list-style:none}
+ul li{position:relative;padding-left:20px;margin-bottom:10px}
+ul li::before{content:"—";position:absolute;left:0;color:var(--faint)}
+code{font-family:var(--mono);font-size:.84em;background:var(--hair2);
+  padding:1.5px 5px;border-radius:4px;color:#2b3a44}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(46,111,176,.32)}
+a:hover{border-bottom-color:var(--accent)}
+.ovl{text-decoration:overline}
+
+/* formula — Style A: meaning on top, notation beneath, column-aligned */
+.fml{background:var(--panel);border:1px solid var(--hair);border-radius:12px;
+  padding:16px 20px;margin:22px 0;overflow-x:auto}
+.fml table{border-collapse:collapse;margin:0 auto}
+.fml td{padding:3px 11px;text-align:center;white-space:nowrap}
+.fml .desc td{font-family:var(--sans);font-weight:600;font-size:15.5px;color:var(--ink)}
+.fml .sym td{font-family:var(--mono);font-size:12.5px;color:var(--muted);padding-top:5px}
+.fml .op{color:var(--faint);font-weight:400}
+.fml .cap{text-align:center;font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:9px}
+
+/* definition panel (resident vs read) */
+.defs{background:var(--panel);border:1px solid var(--hair);border-radius:12px;
+  padding:14px 20px;margin:22px 0;overflow-x:auto}
+.defs table{border-collapse:collapse;width:100%}
+.defs td{padding:8px 10px;vertical-align:baseline}
+.defs tr+tr td{border-top:1px solid var(--hair2)}
+.defs .t{font-family:var(--mono);font-weight:500;color:var(--accent);white-space:nowrap}
+.defs .d{color:var(--ink)}
+.defs .c{color:var(--muted);white-space:nowrap}
+.defs .c b{color:var(--ink);font-weight:600}
+
+/* footer */
+.fn{font-size:13.5px;color:var(--muted);line-height:1.5;border-top:1px solid var(--hair);
+  margin-top:44px;padding-top:16px}
+.fn .m{font-family:var(--mono)}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+.cta a{display:inline-block;border:1px solid var(--hair);border-radius:9px;padding:12px 16px;
+  background:var(--panel);color:var(--ink);border-bottom:1px solid var(--hair)}
+.cta a:hover{border-color:var(--ink)}
+.cta a b{color:var(--accent);font-weight:600}
+.cta .soon{border-style:dashed;color:var(--faint)}
+.cta .soon b{color:var(--faint)}
+</style></head>
+<body><div class="wrap">
+
+<p class="eyebrow">kvrouting <span class="d">·</span> part 1 of 2</p>
+<h1>A KV cache is an area, not a size</h1>
+<p class="dek">Two recent papers put the economics of LLM serving on a firm footing — one from
+queueing theory, one from load balancing. They look unrelated. They are the same picture read
+two ways, and once you see the picture, what to do about an agentic-coding workload falls out
+of it.</p>
+<p class="dek">Everything here follows from the two papers themselves, honestly generalized —
+no new assumptions, no numbers you have to take on faith. Part two breaks one of their
+assumptions on purpose.</p>
+<hr class="rule">
+
+<h2><span class="n">01</span> The workload</h2>
+<p>Agentic coding is a specific and punishing way to use a model. A session is a long
+conversation, and each turn's prompt is the <strong>entire previous turn</strong> — the context
+plus the model's own output — carried forward as a literal prefix, with a small delta bolted on
+(a tool result, a test log). Contexts run 40k–260k tokens; the model emits maybe 500; then comes
+a <strong>think gap</strong> of seconds to minutes while a test runs or a human reads.</p>
+<p>Two features of that shape lure you into mistakes. The reuse is enormous — turn <em>t+1</em>
+shares almost all of turn <em>t</em>'s KV cache — so it is natural to reach for prefix caching
+and treat the cache as a throughput lever. And the KV cache is huge and lives on particular
+GPUs, so it is natural to treat placement as a routing problem. Both instincts are mostly wrong,
+and the two papers tell you exactly why — but only after you see the object they share.</p>
+
+<h2><span class="n">02</span> The object: a request's footprint over time</h2>
+<p>Take one decode request. At each step it appends one token to its KV cache.<sup>*</sup> So its
+<strong>footprint</strong> — the bytes of KV it occupies — grows by one token per step, from the
+prompt length up to prompt-plus-output:</p>
+
+<div class="fml"><table>
+<tr class="desc"><td>footprint at step&nbsp;t</td><td class="op">=</td><td>prefix length</td><td class="op">+</td><td>t</td></tr>
+<tr class="sym"><td>W<sub>i</sub>(t)</td><td class="op">=</td><td>s</td><td class="op">+</td><td>t</td></tr>
+</table><div class="cap">for t = 0 … output length o</div></div>
+
+<p>Plot footprint against time and you get a trapezoid: it starts at the prompt size, ramps up
+as the model generates, and vanishes when the request finishes. <strong>That trapezoid is the
+whole story.</strong> The two papers are two different ways of collapsing it to a single
+number.</p>
+
+<h2><span class="n">03</span> Reading one: integrate over time → a capacity ceiling</h2>
+<p>First question: how many requests can one GPU worker sustain? A worker has a fixed KV budget —
+the HBM left over after weights and workspace, call it the <strong>budget</strong>, perhaps
+500&nbsp;GB.</p>
+<p>The mistake is to think a request's cost is its <em>size</em> (peak footprint) or its
+<em>speed</em> (tokens/sec). It is neither. The cost is the <strong>area under the
+trapezoid</strong> — how much memory it ties up, integrated over how long it ties it up:</p>
+
+<div class="fml"><table>
+<tr class="desc"><td>footprint-area</td><td class="op">≈</td><td>output length</td><td class="op">×</td><td>( prefix length</td><td class="op">+</td><td>output length / 2 )</td></tr>
+<tr class="sym"><td>g(s, o)</td><td class="op">≈</td><td>o</td><td class="op">×</td><td>( s</td><td class="op">+</td><td>o / 2 )</td></tr>
+</table></div>
+
+<p>The units give it away: this is <strong>byte·seconds</strong> — a memory×time area, not bytes
+and not bytes-per-second. A request's claim on a memory-bound server is <em>how much it holds
+for how long</em>. That is the one idea the field is missing when it sizes a cache by its
+peak.</p>
+<p>Sum that area over the requests sharing a worker, cap the sum at the budget, and you get a
+ceiling on the sustainable request rate:</p>
+
+<div class="fml"><table>
+<tr class="desc"><td>sustainable rate</td><td class="op">=</td><td>budget</td><td class="op">÷</td><td>( batch factor</td><td class="op">×</td><td>average footprint-area )</td></tr>
+<tr class="sym"><td>μ</td><td class="op">=</td><td>M</td><td class="op">÷</td><td>( <span class="ovl">b</span></td><td class="op">×</td><td>E[g] )</td></tr>
+</table></div>
+
+<p>The first paper (Nie, Si &amp; Zhou) makes this rigorous and proves something sharp:
+<strong>no scheduler beats this ceiling.</strong> Because memory is additive — two requests on a
+worker occupy the <em>sum</em> of their footprints — you cannot route or reorder your way past
+the total byte·seconds. Every work-conserving policy hits the same wall. They confirmed it on
+real A100s to within ~10%. Call this reading <strong>memory-as-capacity</strong>.</p>
+<p>Notice what it does <em>not</em> involve: multiple GPUs coordinating. Their multi-GPU setup is
+just independent replicas — eight separate servers, no cross-talk. Hold that thought.</p>
+
+<h2><span class="n">04</span> Reading two: max across workers → a barrier</h2>
+<p>Now put the same trapezoids on a real multi-GPU deployment, and a second cost appears that the
+first reading cannot see.</p>
+<p>Large models are served with their layers split across GPUs. In the layout that is now
+standard for big mixture-of-experts models — attention run <strong>data-parallel</strong>,
+experts run <strong>expert-parallel</strong> across the same GPUs (the SGLang / DeepSeek
+arrangement) — the GPUs <strong>synchronize on every single decode step</strong>: each step, an
+all-to-all collective shuffles tokens out to their experts and back. That collective is a
+barrier. Every rank waits for the slowest.</p>
+<p>And the slowest rank is the one with the most resident KV to read: attention each step reads
+the whole resident cache, so more resident KV means a slower step. Hence:</p>
+
+<div class="fml"><table>
+<tr class="desc"><td>step time</td><td class="op">=</td><td>per-token read cost</td><td class="op">×</td><td>busiest rank's resident KV</td><td class="op">+</td><td>collective</td></tr>
+<tr class="sym"><td>—</td><td class="op">=</td><td>α</td><td class="op">×</td><td>max<sub>g</sub> L<sub>g</sub></td><td class="op">+</td><td>T<sub>sync</sub></td></tr>
+</table></div>
+
+<p>The busiest rank sets the pace; every other rank idles for the difference. The second paper
+(Chen et al.) measures this in production and finds the idle exceeds <strong>40% per step</strong>.
+At that level, imbalance is not a tax on throughput — it <em>is</em> the throughput problem. Call
+this reading <strong>memory-as-barrier</strong>.</p>
+
+<h2><span class="n">05</span> The same trapezoid, twice</h2>
+<p>Here is the unification, and the reason to hold both papers in one hand:</p>
+<blockquote>
+<p><strong>Integrate</strong> a request's footprint over its lifetime → the area → the capacity
+ceiling. <span class="src">(paper one)</span></p>
+<p>Take the <strong>max</strong> of footprints across workers each step → the barrier idle.
+<span class="src">(paper two)</span></p>
+</blockquote>
+<p>One trapezoid. Collapse the <strong>time</strong> axis and you get capacity; collapse the
+<strong>worker</strong> axis and you get the barrier. Paper one is memory summed over time on one
+worker; paper two is memory maxed across workers at one instant. They are not competing models —
+they are two projections of the same object. And neither one models reuse, which is exactly the
+door the workload walks through.</p>
+
+<h2><span class="n">06</span> The one refinement that unlocks the workload: resident vs. read</h2>
+<p>Both papers use a single quantity for "load" — the footprint. But two footprints hide inside
+it, and they are equal only by accident:</p>
+
+<div class="defs"><table>
+<tr><td class="t">resident</td><td class="d">KV sitting in a worker's HBM</td><td class="c">→ capped by the budget &nbsp;<b>(capacity)</b></td></tr>
+<tr><td class="t">read</td><td class="d">KV a worker must <em>read</em> this step</td><td class="c">→ sets the barrier &nbsp;<b>(idle)</b></td></tr>
+</table></div>
+
+<p>In the base model they are the same number. In an iterated workload they come apart — because
+between turns, a session's KV is <strong>resident but not read</strong>. The human is thinking;
+the test is running; the KV is sitting in HBM doing nothing. That single gap between
+<code>resident</code> and <code>read</code> is where the entire agentic-coding story lives. Keep
+the two words apart and everything below follows; merge them and none of it is even statable.</p>
+
+<h2><span class="n">07</span> Agentic coding: the cache gives the decode pool nothing</h2>
+<p>Now the payoff, and the first counter-intuitive result. Turn <em>t+1</em> reuses almost all of
+turn <em>t</em>'s KV. Surely that helps throughput?</p>
+<p>It does not — because <strong>turns of one conversation are never concurrent.</strong> Turn
+<em>t+1</em> begins only after turn <em>t</em> finishes, so two turns of one session never sit on
+a worker at the same instant, so there is nothing to deduplicate, so the cache buys the
+<em>decode</em> pool exactly nothing. Look at the area: <code>g ≈ o·(s + o/2)</code> is about
+99.5% the prefix <code>s</code>. Caching does not shrink <code>s</code> — the active turn still
+pins ~107k tokens of KV for 500 steps just to emit 500 tokens. The capacity ceiling from paper
+one is untouched. A prefix-sharing attention kernel finds nothing to share: turn it on, and on
+this workload the output does not change by a single token.</p>
+<p>So where does all that reuse go? Into <strong>prefill</strong>. A warm turn — 1.5k new tokens
+attending to a 107k cached prefix — is about <strong>47× cheaper</strong> than recomputing the
+context cold. That part is real and large. But it makes the cache a <strong>storage</strong>
+question, not a throughput or routing one: the only thing that matters is <em>where a session's
+107k tokens of KV live during the think gap.</em></p>
+
+<h2><span class="n">08</span> Result one, from paper one: never pin idle KV</h2>
+<p>A turn finishes; the session's KV is now resident but idle for the next 15 seconds. Three
+options.</p>
+<p><strong>Pin it in HBM</strong> so it stays instantly warm. This looks conservative and is a
+quiet disaster. Idle KV occupies the budget while doing no work — it is, in paper one's own
+terms, <em>non-work-conserving</em> — and paper one's arithmetic tells you the price. If a
+session is idle for <code>I</code> seconds between turns and active for <code>T_s</code> per
+turn, pinning shrinks your concurrency by a <strong>duty-cycle factor</strong>:</p>
+
+<div class="fml"><table>
+<tr class="desc"><td>concurrency you keep</td><td class="op">∝</td><td>1</td><td class="op">÷</td><td>( 1</td><td class="op">+</td><td>idle time ÷ active time )</td></tr>
+<tr class="sym"><td>—</td><td class="op">∝</td><td>1</td><td class="op">÷</td><td>( 1</td><td class="op">+</td><td>I ÷ T<sub>s</sub> )</td></tr>
+</table></div>
+
+<p>At coding gaps (≈15&nbsp;s idle over ≈10&nbsp;s of service) that is already ~2.5×; pinning
+through the gap collapses active concurrency about <strong>7.7×</strong> and costs ~38% of
+goodput. Pinning is not caution — it is a capacity leak with a friendly face.</p>
+<p><strong>Discard it</strong> and recompute next turn. Now every turn is a cold prefill — the
+O(s²) attention you were trying to avoid — about <strong>81×</strong> the cost of simply
+reloading the KV, and it inflates the prefill pool ~26×.</p>
+<p><strong>Offload it node-local</strong> — DMA it down to host DRAM and back when the turn
+returns. It costs essentially no GPU time. The break-even think-gap is a single PCIe round trip,
+<strong>~117&nbsp;ms</strong>; real gaps are 1–300 seconds.</p>
+<p>So: <strong>offload, always. Never pin, never discard.</strong> This is nothing but paper one,
+read honestly and applied to a workload it never considered — and it <em>vindicates</em> paper
+one. Memory-as-capacity, taken seriously, says do not squat on HBM with idle state.</p>
+
+<h2><span class="n">09</span> Result two, from paper two: cache affinity manufactures the barrier</h2>
+<p>Now the routing question. A turn arrives; its KV is offloaded at "home," the worker that served
+the last turn. Where do you run it?</p>
+<p><strong>Cache affinity</strong> says: send it home — the KV is right there, first-token latency
+is low. <strong>Balance</strong> says: send it to the least-loaded worker. Under agentic coding,
+affinity is a trap. With no sharing across sessions, nothing forces workers to fill evenly, so
+routing every turn back to its home piles the long-context sessions wherever they happen to have
+landed. The busiest worker's resident KV runs far above the average — and paper two's barrier
+bites: the whole pool idles waiting on the straggler. Measured, cache affinity runs
+<strong>~15% barrier idle against ~4% for balance</strong> — about 11% of goodput, gone.</p>
+<p>That is the sharp part: <strong>paper two's 40%-idle pathology, in this workload, is caused by
+cache affinity.</strong> The router pulls the trigger. And this too is just paper two, applied
+honestly — it <em>vindicates</em> Chen: the barrier dominates, and here it is cache-aware routing
+that feeds it.</p>
+
+<h2><span class="n">10</span> The standoff</h2>
+<p>Put the two results together and you are in a vise:</p>
+<ul>
+<li><strong>Affinity</strong> gives you a warm local cache and cheap first-token latency — and
+concentrates load, so the barrier wrecks throughput.</li>
+<li><strong>Balance</strong> gives you throughput — and now the session's KV is on the
+<em>wrong</em> worker, so you have paid a first-token penalty to get it there.</li>
+</ul>
+<p>The obvious fix is to have both: run the session on a lightly-loaded worker <em>and</em> have
+its KV already sitting there. But that means <strong>moving the KV</strong> from home to the
+balanced worker — and moving KV is exactly the thing paper two assumes you cannot do. Its entire
+model rests on <em>sticky</em> assignment: migrating a cache is impractical, so you place new
+work and live with it.</p>
+<p>So, staying strictly inside the two papers, you are stuck. And notice what everything to this
+point has cost: nothing but a careful re-reading of two existing models. No new assumptions, no
+unmeasured constants — and both source papers come out looking <em>more</em> right, not less.</p>
+<p>The way out requires breaking their shared assumption that a KV cache cannot move. What that
+costs, whether it is worth it, and how far you can push it — reactively when a turn lands, or
+proactively during the think gap — is the next article.</p>
+
+<p class="fn"><sup>*</sup> <span class="m">Speculative decoding</span> appends a variable-length
+chunk per step rather than one token; it dents the "+1 per step" picture but not the shape of the
+argument. Set it aside for now.</p>
+
+<div class="cta">
+<a href="index.html">Play with these numbers live &nbsp;<b>→ the kvcalc dashboard</b></a>
+<a class="soon">Part 2 <b>· Migration — coming next</b></a>
+</div>
+
+</div></body></html>
