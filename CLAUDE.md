@@ -15,7 +15,7 @@ The workload of record is **agentic coding**: long-lived conversations where tur
 **They are the same object under two functionals.** Nie's `g` is the time-integral of Chen's per-step profile `W_i = (s, s+1, …, s+o)`. Integrate → capacity ceiling. Take the max across workers → barrier idle. Neither models reuse.
 
 Two things worth checking in Chen et al. if you go back to them:
-- Their theorems appear to be proved for the **H=0 specialisation** — meaning the headline Ω(√(B log G)) guarantee may not need the lookahead they bill as the central insight. Verify against the theorem statements.
+- **Verified:** the headline bound (Theorem 2, `IIR = Ω(√(B log G))` over FCFS) is proved for the **H=0 specialisation** — their own words, "we therefore focus on the case H=0 … minimises the current-step imbalance," and the guarantees "do not depend on H>0." So the lookahead they bill as the central insight is empirically-only, theoretically inert, and simulation-only (not in production). Cite the myopic H=0 result; discount the lookahead. The lookahead's "robust signal" also assumes +1-token/step growth, which speculative decoding violates. Full write-up in `papers/notes.md`.
 - The **energy claim moved between versions**: v1 body reports 3.4%; the v2 abstract advertises 28% measured and >52% at fleet scale, two days later. Reconcile before citing.
 
 ## The central modelling move
