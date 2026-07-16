@@ -79,27 +79,25 @@ two quantities that the base model happens to make equal:
     resident = tokens occupying a node's HBM        (capped by the budget → Nie's constraint)
     read     = tokens a node must READ this step     (sets the barrier   → Chen's cost)
 
-They come apart in exactly two ways, and each divergence is a result:
-1. **Idle KV** — between turns, a session's KV is **resident but not read**. → retention.
-2. **Shared prefix** — a cascade kernel reads a shared prefix **once** for the whole batch,
-   though it is resident once. → cascade.
+They come apart on the one axis that matters for this workload:
+- **Idle KV** — between turns, a session's KV is **resident but not read**. That single gap
+  is where retention, the exchange rate, and pre-staging all live.
 
-**Reuse (sharing-factor).** `sharing-factor = nominal footprint / unique footprint` [κ]:
-- **Spatial** (concurrent conversations share a system prompt / repo): sharing-factor > 1,
-  node-load becomes submodular, capacity turns routing-dependent — *generalizes* Nie.
-- **Temporal** (turns of one conversation): sharing-factor ≡ 1 — turns never co-reside —
-  so Nie is *exact* and the cascade kernel is a no-op.
+(They *could* also diverge if concurrent requests shared a prefix — read once though resident
+once — but turns of one conversation are never concurrent, so there is nothing to share. That
+regime is a separate, archived line of work, `price-of-a-cache-hit.md`, and touches nothing
+below.)
 
 **The three results, as corollaries** (full closed forms in `analytics.py`):
 
 | result | drops out of | where |
 |---|---|---|
-| **never pin; offload node-local** | divergence #1 — pinning inflates `resident` without touching `read`; a Little's-law fixed point. Break-even = one PCIe round trip | `analytics.retention()` |
+| **never pin; offload node-local** | the idle-KV gap — pinning inflates `resident` without touching `read`; a Little's-law fixed point. Break-even = one PCIe round trip | `analytics.retention()` |
 | **the exchange rate** | `resident`-cost (one-time, local) vs `read`-cost through the barrier (recurring, global, ×(nodes−1)). Migrate < recompute ≈ barrier | `analytics.exchange_rate()` |
 | **think-gap pre-staging** | move `resident` to a balanced node *while `read = 0`* for that session (the gap), so at admission `read` lands balanced for free | E8 / `analytics.prestage_economics()` |
 
 That's the framework: one trapezoid, integrated for capacity and maxed for the barrier,
-with `resident`/`read` split so reuse and idleness have somewhere to live.
+with the `resident`/`read` split so idleness has somewhere to live.
 
 ---
 
