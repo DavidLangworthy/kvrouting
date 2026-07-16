@@ -1,0 +1,13 @@
+# kv-area (Article 1) — web wrapper. Lives in the CONTENT repo (kvrouting/web/), not fs-web.
+# Content paths are relative to the repo root (--content-root); intro is relative to this file.
+slug: kv-area
+title: A KV cache is an area, not a size
+date: 2026-07-15
+description: Two recent papers — one queueing-theoretic (ICML 2026), one on load balancing — are two readings of a single object, a request's KV footprint over time. Integrate it for capacity; take its max across workers for the barrier.
+body: blog/kv-area.md
+dashboard: docs/index.html
+comments:
+  repo: DavidLangworthy/kvrouting
+  repoId: R_kgDOTXnKeg
+  category: Q&A
+  categoryId: DIC_kwDOTXnKes4DBRnV
