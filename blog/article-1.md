@@ -65,14 +65,17 @@ sustainable rate  =  budget  ÷  ( batch factor  ×  average footprint-area )
       μ           =    M      ÷  (     b̄        ×          E[g]          )
 ```
 
-The first paper (Nie, Si & Zhou) makes this rigorous and proves something sharp: **no scheduler
-beats this ceiling.** Because memory is additive — two requests on a worker occupy the *sum* of
-their footprints — you cannot route or reorder your way past the total byte·seconds. Every
-work-conserving policy hits the same wall. They confirmed it on real A100s to within ~10%. Call
-this reading **memory-as-capacity**.
+The first paper (Nie, Si & Zhou) makes this rigorous — for a **single worker** — and proves
+something sharp: no scheduling policy beats this ceiling. Being *work-conserving* (never idle
+while requests wait) is all it takes; the order and batching you pick cannot move the wall. That
+is the whole theorem: one GPU, scheduling only. It says nothing about routing across GPUs — and
+it does not need to, because memory is additive, so spreading requests over more workers just
+sums the same ceiling. Routing moves byte·seconds around; it never reduces them. They confirmed
+the single-worker result on real A100s to within ~10%. Call this reading **memory-as-capacity**.
 
-Notice what it does *not* involve: multiple GPUs coordinating. Their multi-GPU setup is just
-independent replicas — eight separate servers, no cross-talk. Hold that thought.
+Notice what it does *not* involve: coordination. Their eight-GPU test is independent replicas —
+requests round-robined across eight separate servers, no cross-talk, capacity just multiplied by
+eight. Hold that thought.
 
 ## Reading two: max across workers → a barrier
 

@@ -146,13 +146,17 @@ ceiling on the sustainable request rate:</p>
 <tr class="sym"><td>μ</td><td class="op">=</td><td>M</td><td class="op">÷</td><td>( <span class="ovl">b</span></td><td class="op">×</td><td>E[g] )</td></tr>
 </table></div>
 
-<p>The first paper (Nie, Si &amp; Zhou) makes this rigorous and proves something sharp:
-<strong>no scheduler beats this ceiling.</strong> Because memory is additive — two requests on a
-worker occupy the <em>sum</em> of their footprints — you cannot route or reorder your way past
-the total byte·seconds. Every work-conserving policy hits the same wall. They confirmed it on
-real A100s to within ~10%. Call this reading <strong>memory-as-capacity</strong>.</p>
-<p>Notice what it does <em>not</em> involve: multiple GPUs coordinating. Their multi-GPU setup is
-just independent replicas — eight separate servers, no cross-talk. Hold that thought.</p>
+<p>The first paper (Nie, Si &amp; Zhou) makes this rigorous — for a <strong>single worker</strong>
+— and proves something sharp: no scheduling policy beats this ceiling. Being
+<em>work-conserving</em> (never idle while requests wait) is all it takes; the order and batching
+you pick cannot move the wall. That is the whole theorem: one GPU, scheduling only. It says
+nothing about routing across GPUs — and it does not need to, because memory is additive, so
+spreading requests over more workers just sums the same ceiling. Routing moves byte·seconds
+around; it never reduces them. They confirmed the single-worker result on real A100s to within
+~10%. Call this reading <strong>memory-as-capacity</strong>.</p>
+<p>Notice what it does <em>not</em> involve: coordination. Their eight-GPU test is independent
+replicas — requests round-robined across eight separate servers, no cross-talk, capacity just
+multiplied by eight. Hold that thought.</p>
 
 <h2><span class="n">04</span> Reading two: max across workers → a barrier</h2>
 <p>Now put the same trapezoids on a real multi-GPU deployment, and a second cost appears that the
