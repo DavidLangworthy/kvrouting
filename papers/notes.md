@@ -96,8 +96,51 @@ below.)
 | **the exchange rate** | `resident`-cost (one-time, local) vs `read`-cost through the barrier (recurring, global, ×(nodes−1)). Migrate < recompute ≈ barrier | `analytics.exchange_rate()` |
 | **think-gap pre-staging** | move `resident` to a balanced node *while `read = 0`* for that session (the gap), so at admission `read` lands balanced for free | E8 / `analytics.prestage_economics()` |
 
+**Provenance — source-native vs our extension.** Keep this line clean; it's what makes the
+critique fair. A result is *source-native* if it uses only Nie's or Chen's own machinery plus
+a faithful extension. It becomes *ours* the moment it needs KV to **move across nodes** —
+which Chen deliberately assumed it cannot ("sticky") — and doubly so if it also needs
+**prediction**.
+
+| result | bucket | adds beyond Nie / Chen | risk lives in |
+|---|---|---|---|
+| never pin / offload | **Nie, directly generalized** | iterated turns (idle gaps) + a near-free node-local offload tier | — none (no shaky constant) |
+| the exchange rate | **ours — reactive migration** | KV can move across nodes (relaxes Chen's *sticky*) + a fabric cost model | **`W_FABRIC`** (unmeasured) |
+| think-gap pre-staging | **ours — proactive migration** | movable KV + the gap as a scheduling resource + a return-time predictor | **`W_FABRIC` + σ** (both unmeasured) |
+
+Retention *vindicates* Nie (memory-as-capacity, read honestly, says don't pin);
+"balance beats affinity" *vindicates* Chen (his barrier, on the temporal workload where memory
+no longer pre-balances the pool). So the source papers are judged only on what they claimed —
+capacity and barrier/imbalance — and both hold. The "migrate rather than stall" story is
+entirely our extension and rests on our two unmeasured numbers; that's **ours to defend, not
+theirs**.
+
 That's the framework: one trapezoid, integrated for capacity and maxed for the barrier,
 with the `resident`/`read` split so idleness has somewhere to live.
+
+---
+
+## Blog structure: two articles
+
+The provenance seam *is* the article boundary, and **Chen's sticky-KV assumption is the
+hinge**: article 1 lives inside it, article 2 relaxes it.
+
+**Article 1 — the two papers, honestly generalized.** The `g(s,o)` byte·seconds area; the two
+functionals (integrate over time → capacity / Nie; max over nodes → barrier / Chen); the
+`resident`/`read` split; the temporal workload (turns never co-reside, so the decode pool
+gains nothing from reuse — the cache's value is prefill, i.e. storage). Source-native results
+only: **never-pin / offload** (Nie, generalized) and **balance-beats-affinity — the barrier
+bites** (Chen, temporal). Ends on the tension: affinity manufactures the barrier idle, balance
+pays the TTFT, and *within Chen's world you are stuck, because KV cannot move*. Nothing here
+rests on an unmeasured constant — it's the safe, source-faithful article.
+
+**Article 2 — migration (assumes article 1).** Opens by relaxing the one assumption article 1
+left standing: KV *can* move. Then the two results that follow — the **exchange rate**
+(reactive: migrate vs recompute vs eat the barrier) and **think-gap pre-staging** (proactive:
+move it in the gap). Both are ours; both rest on our two unmeasured numbers, **`W_FABRIC`** and
+the predictor **σ**, put up front as the load-bearing risks. The saturation figure (Fig. 1) and
+the pre-staging dashboard panel land here. Open with a one-paragraph recap of article 1 so it
+stands alone.
 
 ---
 
