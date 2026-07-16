@@ -14,10 +14,8 @@ Take one decode request. At each step it appends one token to its KV cache.[^spe
 **footprint** — the bytes of KV it occupies — grows by one token per step, from the prompt length
 up to prompt-plus-output:
 
-```
-footprint at step t  =  prefix length  +  t
-      W_i(t)         =       s          +  t            for t = 0 … output length o
-```
+**footprint at step t = prefix length + t**<br>
+`W_i(t) = s + t`   *(for t = 0 … output length o)*
 
 Plot footprint against time and you get a trapezoid: it starts at the prompt size, ramps up as
 the model generates, and vanishes when the request finishes. **That trapezoid is the whole
@@ -32,10 +30,8 @@ The mistake is to think a request's cost is its *size* (peak footprint) or its *
 (tokens/sec). It is neither. The cost is the **area under the trapezoid** — how much memory it
 ties up, integrated over how long it ties it up:
 
-```
-footprint-area  ≈  output length  ×  ( prefix length  +  output length / 2 )
-    g(s, o)     ≈        o         ×  (      s         +        o / 2       )
-```
+**footprint-area ≈ output length × (prefix length + output length / 2)**<br>
+`g(s, o) ≈ o · (s + o/2)`
 
 The units give it away: this is **byte·seconds** — a memory×time area, not bytes and not
 bytes-per-second. A request's claim on a memory-bound server is *how much it holds for how long*.
@@ -44,10 +40,8 @@ That is the one idea you miss if you size a cache by its peak.
 Sum that area over the requests sharing a worker, cap the sum at the budget, and you get a
 ceiling on the sustainable request rate:
 
-```
-sustainable rate  =  budget  ÷  ( batch factor  ×  average footprint-area )
-      μ           =    M      ÷  (     b̄        ×          E[g]          )
-```
+**sustainable rate = budget ÷ (batch factor × average footprint-area)**<br>
+`μ = M / (b̄ · E[g])`
 
 Nie, Si & Zhou make this rigorous — for a **single worker** — and prove something sharp: no
 scheduling policy beats this ceiling. Being *work-conserving* (never idle while requests wait) is
@@ -72,10 +66,8 @@ collective is a barrier, and every rank waits for the slowest.
 And the slowest rank is the one with the most resident KV to read — attention each step reads the
 whole resident cache, so more resident KV means a slower step:
 
-```
-step time  =  per-token read cost  ×  busiest rank's resident KV  +  collective
-    —       =           α           ×          max_g L_g           +   T_sync
-```
+**step time = per-token read cost × busiest rank's resident KV + collective**<br>
+`step = α · maxɡ Lɡ + T_sync`
 
 The busiest rank sets the pace; every other rank idles for the difference. Chen, Bu, Song, Lu, Ye
 & Zhou measure this in a production trace and find the idle exceeds **40% per step**. At that
@@ -88,6 +80,7 @@ Here is the payoff, and the reason to read the two papers together:
 
 > **Integrate** a request's footprint over its lifetime → the area → the capacity ceiling.
 > *(Nie et al.)*
+>
 > Take the **max** of footprints across workers each step → the barrier idle. *(Chen et al.)*
 
 One trapezoid. Collapse the **time** axis and you get capacity; collapse the **worker** axis and

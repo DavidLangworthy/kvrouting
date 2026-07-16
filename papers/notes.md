@@ -122,8 +122,9 @@ with the `resident`/`read` split so idleness has somewhere to live.
 
 ## Blog structure
 
-**Article 1 — the two papers are one object.** *(Written: `blog/article-1.md`,
-`docs/article-1.html`.)* The footprint trapezoid; the `g(s,o)` byte·seconds area; the two
+**Article 1 — the two papers are one object.** *("kv-area"; markdown source
+`blog/kv-area.md` with simple two-line equations; styled HTML `docs/article-1.html` kept for
+now.)* The footprint trapezoid; the `g(s,o)` byte·seconds area; the two
 functionals — integrate over time → capacity (Nie, **single-worker**), max over workers →
 barrier (Chen); the unification (two formalisms, one object). Ends at the boundary both papers
 share: **one-shot requests — no reuse, no persistence, no migration.** Pure exposition — **no
