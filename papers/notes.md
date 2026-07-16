@@ -142,6 +142,31 @@ the predictor **σ**, put up front as the load-bearing risks. The saturation fig
 the pre-staging dashboard panel land here. Open with a one-paragraph recap of article 1 so it
 stands alone.
 
+**`W_FABRIC` — the constant article 2 lives or dies on.** Cross-node KV migration rides the
+*same fabric as the per-step EP all-to-all*, and that all-to-all **is** the barrier — so a
+migration doesn't merely spend bandwidth, it **delays the collective every rank is already
+waiting on**. We charge it `W_FABRIC ×` its raw bandwidth cost (`hardware.py: fetch_fabric =
+tokens · C_KV / B_FABRIC · W_FABRIC`). `W_FABRIC = 10` is a judgment call, not a measurement,
+and every migration conclusion pivots on it:
+- **W = 1** → migration ~110× cheaper than the barrier (conclusions *strengthen*)
+- **W = 10** → ~11× cheaper (what we assume)
+- **W = 100** → comparable — the conclusion **inverts**: don't migrate, affinity returns
+
+It is "the first number to measure on real hardware." And it appears **only** in article 2 —
+it is the *price of moving KV*, and article 1 never moves it (retention offloads node-local
+over PCIe; "balance beats affinity" is a read-imbalance fact, independent of migration cost).
+So the article boundary (Chen's sticky-KV assumption) *is* the `W_FABRIC` boundary: article 1
+carries no unmeasured load-bearing constant — that is exactly what makes it the safe piece —
+and article 2 puts `W_FABRIC` (and, for pre-staging, the predictor σ) up front as the risk.
+
+Caveat for honesty: the *simulator* entangles them slightly — a `bfio` (balance) run does
+physically migrate KV and does charge `W_FABRIC` (it shows in the TTFT / fabric-traffic
+columns). But the *result* that belongs in article 1 — "affinity manufactures the barrier
+idle" — is the `W_FABRIC`-independent part (about where sessions end up resident, not what it
+cost to get them there). Article 1 states the imbalance and the tension; it must **not** quote
+a "migration is worth it" number — that number is article 2's, and it's the one riding on
+`W_FABRIC`.
+
 ---
 
 ## Sharding dimensions (parallelism axes for LLM inference)
