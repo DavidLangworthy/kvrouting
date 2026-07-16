@@ -111,8 +111,12 @@ Here is the unification, and the reason to hold both papers in one hand:
 One trapezoid. Collapse the **time** axis and you get capacity; collapse the **worker** axis and
 you get the barrier. Paper one is memory summed over time on one worker; paper two is memory
 maxed across workers at one instant. They are not competing models — they are two projections of
-the same object. And neither one models reuse, which is exactly the door the workload walks
-through.
+the same object.
+
+And here is what neither of them models: a *conversation*. In both papers a request is one-shot —
+it arrives, decodes, releases its KV, and departs; there are no turns, no sessions, no think
+time. That is not a flaw in either — it is the door the agentic workload walks through. Everything
+below comes from holding their two readings up to a workload they both set aside.
 
 ## The one refinement that unlocks the workload: resident vs. read
 
